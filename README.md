@@ -403,6 +403,11 @@ ATTRS{serial}=="A50285B1"
    -   `/dev/xle_right`
    -   `/dev/xle_left`
 
+   Grant permission to the ports:
+   ``` bash
+   sudo chmod 666 /dev/xle_left /dev/xle_right
+   ```
+
  ## 5. **Make and copy calibration files:**
  We have calibrated the arms for you (Linux only). Please find the calibration files (left_arm.json and right_arm.json) and move them to your cache directory.
    ```bash
