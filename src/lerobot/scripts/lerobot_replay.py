@@ -54,7 +54,6 @@ from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
     bi_so100_follower,
-    earthrover_mini_plus,
     hope_jr,
     koch_follower,
     make_robot_from_config,
@@ -62,8 +61,8 @@ from lerobot.robots import (  # noqa: F401
     so101_follower,
 )
 from lerobot.utils.constants import ACTION
-from lerobot.utils.import_utils import register_third_party_plugins
-from lerobot.utils.robot_utils import precise_sleep
+from lerobot.utils.import_utils import register_third_party_devices
+from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import (
     init_logging,
     log_say,
@@ -122,13 +121,13 @@ def replay(cfg: ReplayConfig):
         _ = robot.send_action(processed_action)
 
         dt_s = time.perf_counter() - start_episode_t
-        precise_sleep(1 / dataset.fps - dt_s)
+        busy_wait(1 / dataset.fps - dt_s)
 
     robot.disconnect()
 
 
 def main():
-    register_third_party_plugins()
+    register_third_party_devices()
     replay()
 
 
