@@ -403,7 +403,7 @@ ATTRS{serial}=="A50285B1"
    -   `/dev/xle_right`
    -   `/dev/xle_left`
 
-   Grant permission to the ports:
+   Grant permission to the ports (IMPORTANT: you must rerun this command every time cables (SO101 arms -> Embedded PC) are replugged):
    ``` bash
    sudo chmod 666 /dev/xle_left /dev/xle_right
    ```
