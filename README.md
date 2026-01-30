@@ -407,7 +407,7 @@ ATTRS{serial}=="A50285B1"
  We have calibrated the arms for you (Linux only). Please find the calibration files (left_arm.json and right_arm.json) and move them to your cache directory.
    ```bash
    mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/so100_follower
-   cp left_arm.json right_arm.json ~/.cache/huggingface/lerobot/calibration/robots/so100_follower
+   cp calibration/left_arm.json calibration/right_arm.json ~/.cache/huggingface/lerobot/calibration/robots/so100_follower
    ```
 
 <br>
