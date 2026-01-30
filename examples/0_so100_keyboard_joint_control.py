@@ -237,6 +237,9 @@ def p_control_loop(robot, keyboard, target_positions, start_positions, kp=0.5, c
                     motor_name = key.removesuffix('.pos')
                     # Apply calibration coefficients
                     calibrated_value = apply_joint_calibration(motor_name, value)
+                    
+                    print(motor_name, "raw:", value, "cal:", calibrated_value)
+
                     current_positions[motor_name] = calibrated_value
             
             # P control calculation
@@ -278,19 +281,24 @@ def main():
         from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
         
         # Get port
-        port = input("Please enter SO100 robot USB port (e.g.: /dev/ttyACM0, /dev/xle_right, /dev/xle_left): ").strip()
+        arm = input("Please which SO100 arm (\"l\" for left arm, \"r\" for right arm): ").strip()
         
         # If directly press enter, use default port
-        if not port:
-            port = "/dev/ttyACM0"
+        if not arm:
+            port = "/dev/xle_right"
             print(f"Using default port: {port}")
-        else:
-            print(f"Connecting to port: {port}")
-        
-        robot_name = input("Please enter the robot name (e.g., 'right_arm' to load 'right_arm.json') [default: right_arm]: ").strip()
-        if not robot_name:
             robot_name = "right_arm"
             print(f"Using default name: {robot_name}")
+        elif arm == "l":
+            port = "/dev/xle_left"
+            print(f"Connecting to port: {port}")
+            robot_name = "left_arm"
+            print(f"Using name: {robot_name}")
+        elif arm == "r":
+            port = "/dev/xle_right"
+            print(f"Connecting to port: {port}")
+            robot_name = "right_arm"
+            print(f"Using name: {robot_name}")
         
         # Configure robot
         robot_config = SO100FollowerConfig(port=port, id=robot_name)

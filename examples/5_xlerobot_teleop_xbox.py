@@ -14,8 +14,8 @@ import math
 import pygame
 
 from lerobot.robots.xlerobot import XLerobotConfig, XLerobot
-from lerobot.utils.robot_utils import busy_wait
-from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
+#from lerobot.utils.robot_utils import busy_wait
+from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
 
 # Keymaps (semantic action: controller mapping) - Intuitive human control
@@ -89,6 +89,15 @@ class SimpleHeadControl:
         }
         self.zero_pos = {"head_motor_1": 0.0, "head_motor_2": 0.0}
 
+    def move_to_initial_position(self, robot, initial_obs):
+        print("[HEAD] Moving to Initial Position for safe exit...")
+        self.target_positions = {
+            "head_motor_1": initial_obs.get("head_motor_1.pos", 0.0),
+            "head_motor_2": initial_obs.get("head_motor_2.pos", 0.0),
+        }
+        action = self.p_control_action(robot)
+        robot.send_action(action)
+
     def move_to_zero_position(self, robot):
         self.target_positions = self.zero_pos.copy()
         action = self.p_control_action(robot)
@@ -157,7 +166,20 @@ class SimpleTeleopArm:
             'wrist_roll': 0.0,
             'gripper': 0.0
         }
-
+    
+    def move_to_initial_position(self, robot, initial_obs):
+        print(f"[{self.prefix}] Moving to Initial Position for safe exit...")
+        self.target_positions = {
+            "shoulder_pan": initial_obs[f"{self.prefix}_arm_shoulder_pan.pos"],
+            "shoulder_lift": initial_obs[f"{self.prefix}_arm_shoulder_lift.pos"],
+            "elbow_flex": initial_obs[f"{self.prefix}_arm_elbow_flex.pos"],
+            "wrist_flex": initial_obs[f"{self.prefix}_arm_wrist_flex.pos"],
+            "wrist_roll": initial_obs[f"{self.prefix}_arm_wrist_roll.pos"],
+            "gripper": initial_obs[f"{self.prefix}_arm_gripper.pos"],
+        }
+        action = self.p_control_action(robot)
+        robot.send_action(action)
+    
     def move_to_zero_position(self, robot):
         print(f"[{self.prefix}] Moving to Zero Position: {self.zero_pos} ......")
         self.target_positions = self.zero_pos.copy()  # Use copy to avoid reference issues
@@ -351,9 +373,9 @@ def get_base_action(joystick, robot):
     
     # Map controller inputs to keyboard-like keys for base control
     if hats[1] == 1:   # D-pad up
-        pressed_keys.add('k')  # Forward
+        pressed_keys.add('i')  # Forward
     if hats[1] == -1:  # D-pad down
-        pressed_keys.add('i')  # Backward
+        pressed_keys.add('k')  # Backward
     if hats[0] == -1:  # D-pad left
         pressed_keys.add('u')  # Rotate left
     if hats[0] == 1:   # D-pad right
@@ -400,6 +422,7 @@ def get_base_speed_control(joystick):
     return speed_multiplier
 
 
+
 def main():
     FPS = 30
     robot_config = XLerobotConfig()
@@ -413,7 +436,7 @@ def main():
         print(robot)
         return
 
-    _init_rerun(session_name="xlerobot_teleop_xbox")
+    init_rerun(session_name="xlerobot_teleop_xbox")
 
     # Init XBOX controller
     pygame.init()
@@ -427,6 +450,7 @@ def main():
 
     # Init the arm and head instances
     obs = robot.get_observation()
+    initial_obs = obs.copy() 
     kin_left = SO101Kinematics()
     kin_right = SO101Kinematics()
     left_arm = SimpleTeleopArm(kin_left, LEFT_JOINT_MAP, obs, prefix="left")
@@ -450,10 +474,20 @@ def main():
             # Handle global reset for all components
             if global_reset:
                 print("[MAIN] Global reset triggered!")
-                left_arm.move_to_zero_position(robot)
-                right_arm.move_to_zero_position(robot)
-                head_control.move_to_zero_position(robot)
+                left_arm.move_to_initial_position(robot, initial_obs)
+                right_arm.move_to_initial_position(robot, initial_obs)
+                head_control.move_to_initial_position(robot, initial_obs)
                 continue
+                
+            # Check for exit (start button)
+            start_pressed = bool(buttons[7]) if len(buttons) > 7 else False
+            if start_pressed:
+                print("[MAIN] Safe exit triggered! Returning to initial position...")
+                left_arm.move_to_initial_position(robot, initial_obs)
+                right_arm.move_to_initial_position(robot, initial_obs)
+                head_control.move_to_initial_position(robot, initial_obs)
+                time.sleep(2)  # Give time for arms to reach initial position
+                break
 
             # Handle both arms separately and simultaneously
             left_arm.handle_keys(left_key_state)
