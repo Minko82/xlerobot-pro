@@ -9,10 +9,11 @@ import time
 SERIAL_PORT = "/dev/tty.usbmodem5A680135181"
 DEG2RAD = np.pi / 180.0
 
-# Read head motor positions from XLerobot
+# Connect to xlerobot
 xlerobot_config = XLerobotConfig(port1=SERIAL_PORT, use_degrees=True)
 xlerobot = XLerobot(xlerobot_config)
 xlerobot.connect()
+# Read head motor positions from XLerobot
 state = xlerobot.get_observation()
 head_pan_deg = float(state["head_motor_1.pos"])
 head_tilt_deg = float(state["head_motor_2.pos"])
