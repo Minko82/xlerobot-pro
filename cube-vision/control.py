@@ -1,12 +1,26 @@
 from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
+from lerobot.robots.xlerobot import XLerobot, XLerobotConfig
 import numpy as np
 from ik_solver import IK_SO101
 from point_cloud import PointCloud
 from frame_transform import frame_transform
 import time
 
-# Connect to robot
-config = SO100FollowerConfig(port="/dev/tty.usbmodem5A680135181", use_degrees=True)
+SERIAL_PORT = "/dev/tty.usbmodem5A680135181"
+DEG2RAD = np.pi / 180.0
+
+# Read head motor positions from XLerobot
+xlerobot_config = XLerobotConfig(port1=SERIAL_PORT, use_degrees=True)
+xlerobot = XLerobot(xlerobot_config)
+xlerobot.connect()
+state = xlerobot.get_observation()
+head_pan_deg = float(state["head_motor_1.pos"])
+head_tilt_deg = float(state["head_motor_2.pos"])
+xlerobot.disconnect()
+print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
+
+# Connect follower arm for control
+config = SO100FollowerConfig(port=SERIAL_PORT, use_degrees=True)
 robot = SO100Follower(config)
 robot.connect()
 
@@ -18,17 +32,45 @@ objects = point_cloud.dbscan_objects()
 if not objects:
     raise RuntimeError("No objects detected in point cloud")
 centroid = objects[0]["centroid"]
-RS_JOINT_KEYS = {"head_pan_joint": 0.0, "head_tilt_joint": 0.0}
+print(f"Camera centroid (optical frame): {centroid}")
+
+RS_JOINT_KEYS = {
+    "head_pan_joint": head_pan_deg * DEG2RAD,
+    "head_tilt_joint": head_tilt_deg * DEG2RAD,
+}
 arm_frame_x, arm_frame_y, arm_frame_z = frame_transform.camera_xyz_to_base_xyz(
     centroid[0], centroid[1], centroid[2], RS_JOINT_KEYS
 )
-print([arm_frame_x, arm_frame_y, arm_frame_z])
+print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+
+# Test different rotation corrections - uncomment the one to try
+# Option 0: No rotation (use Base frame directly)
+corrected_x = arm_frame_x
+corrected_y = arm_frame_y
+corrected_z = arm_frame_z
+#
+# Option 1: 90° about Z
+# corrected_x = arm_frame_y
+# corrected_y = -arm_frame_x
+# corrected_z = arm_frame_z
+#
+# Option 2: -90° about Z
+# corrected_x = -arm_frame_y
+# corrected_y = arm_frame_x
+# corrected_z = arm_frame_z
+#
+# Option 3: 180° about Z
+# corrected_x = -arm_frame_x
+# corrected_y = -arm_frame_y
+# corrected_z = arm_frame_z
+
+print(f"Corrected for IK solver (so101 base_link): [{corrected_x:.4f}, {corrected_y:.4f}, {corrected_z:.4f}]")
 ik_solve = IK_SO101()
 
 dt = 0.01
 test_dt = 0.1
 
-trajectory_rad = ik_solve.generate_ik([arm_frame_x, arm_frame_y, arm_frame_z], [-0.05, -0.01, -0.0808])
+trajectory_rad = ik_solve.generate_ik([corrected_x, corrected_y, corrected_z], [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
 # Move individual joints (degrees)
 RAD2DEG = 180.0 / np.pi
@@ -43,9 +85,6 @@ ARM_JOINT_KEYS = [
     "wrist_roll.pos",
     "gripper.pos",
 ]
-
-for step in trajectory:
-    print(step)
 
 
 def traj_to_action(q_deg: np.ndarray) -> dict:
@@ -65,38 +104,6 @@ for action in actions:
 
 hold_action = {k: v for k, v in actions[-1].items() if k != "gripper.pos"}
 for grip in range(100, 5, -5):
-    action = dict(hold_action)
-    action["gripper.pos"] = float(grip)
-    robot.send_action(action)
-    time.sleep(0.05)
-
-trajectory_rad = ik_solve.generate_ik([0.30, 0.0, 0.10], [-0.05, -0.01, -0.0808])
-traj_rad_stack = np.stack(trajectory_rad)
-trajectory = traj_rad_stack * RAD2DEG
-
-
-actions = [traj_to_action(q_deg) for q_deg in trajectory]
-
-for action in actions:
-    robot.send_action(action)
-    time.sleep(dt)
-
-
-# Movement 2
-trajectory_rad = ik_solve.generate_ik([0.10, 0.0, 0.0], [-0.05, -0.01, -0.0808])
-traj_rad_stack = np.stack(trajectory_rad)
-trajectory = traj_rad_stack * RAD2DEG
-
-
-actions = [traj_to_action(q_deg) for q_deg in trajectory]
-
-for action in actions:
-    robot.send_action(action)
-    time.sleep(dt)
-
-hold_action = {k: v for k, v in actions[-1].items() if k != "gripper.pos"}
-
-for grip in range(5, 100, 5):
     action = dict(hold_action)
     action["gripper.pos"] = float(grip)
     robot.send_action(action)
