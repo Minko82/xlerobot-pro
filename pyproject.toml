@@ -170,6 +170,7 @@ all = [
 ]
 
 [project.scripts]
+xlerobot-power-experiments="lerobot.scripts.xlerobot_power_experiments:main"
 lerobot-calibrate="lerobot.scripts.lerobot_calibrate:main"
 lerobot-find-cameras="lerobot.scripts.lerobot_find_cameras:main"
 lerobot-find-port="lerobot.scripts.lerobot_find_port:main"
