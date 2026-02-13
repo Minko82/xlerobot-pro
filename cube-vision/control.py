@@ -31,6 +31,10 @@ try:
     point_cloud.create_point_cloud_from_rgbd()
     point_cloud.segment_plane()
     objects = point_cloud.dbscan_objects()
+    try:
+        point_cloud.visualize("Segmented Point Cloud")
+    except Exception as e:
+        print(f"Visualization failed (continuing): {e}")
     if not objects:
         raise RuntimeError("No objects detected in point cloud")
     centroid = objects[0]["centroid"]

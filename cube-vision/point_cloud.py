@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
+
 import open3d as o3d
 import numpy as np
 from pathlib import Path
@@ -84,7 +87,7 @@ class PointCloud:
         o3d.io.write_point_cloud(str(self.ply_path), self.pcd)
         print(f"Saved point cloud to {self.ply_path}")
 
-    def segment_plane(self, distance_threshold=0.019, ransac_n=3, num_iterations=10000):
+    def segment_plane(self, distance_threshold=0.02, ransac_n=3, num_iterations=10000):
         self.plane_model, inliers = self.pcd.segment_plane(
             distance_threshold=distance_threshold, ransac_n=ransac_n, num_iterations=num_iterations
         )
@@ -93,10 +96,40 @@ class PointCloud:
 
         self.pcd = self.pcd.select_by_index(inliers, invert=True)
 
+    def crop_above_plane(self, max_height=0.20):
+        """Keep only points within max_height meters above the detected table plane."""
+        a, b, c, d = self.plane_model
+        norm = np.sqrt(a**2 + b**2 + c**2)
+        points = np.asarray(self.pcd.points)
+        dist = (a * points[:, 0] + b * points[:, 1] + c * points[:, 2] + d) / norm
+        # RANSAC normal direction is arbitrary — take the side with more points as table
+        # Objects above table are on whichever side has fewer points
+        pos_count = np.sum(dist > 0)
+        neg_count = np.sum(dist < 0)
+        if neg_count < pos_count:
+            # fewer points on negative side → objects are there
+            mask = (dist < 0) & (dist > -max_height)
+        else:
+            # fewer points on positive side → objects are there
+            mask = (dist > 0) & (dist < max_height)
+        print(f"Plane dist range: {dist.min():.3f} to {dist.max():.3f}, pos={pos_count}, neg={neg_count}")
+        self.pcd = self.pcd.select_by_index(np.where(mask)[0])
+        print(f"After crop_above_plane: {len(self.pcd.points)} points")
+
+    def crop_sides(self, x_range=(-0.15, 0.15), y_range=(-0.10, 0.10)):
+        """Remove points outside the given X and Y bounds (meters, camera frame)."""
+        points = np.asarray(self.pcd.points)
+        mask = (
+            (points[:, 0] >= x_range[0]) & (points[:, 0] <= x_range[1]) &
+            (points[:, 1] >= y_range[0]) & (points[:, 1] <= y_range[1])
+        )
+        self.pcd = self.pcd.select_by_index(np.where(mask)[0])
+        print(f"After crop_sides: {len(self.pcd.points)} points")
+
     def segment_grippers(self):
         pass
 
-    def dbscan_objects(self, min_points_per_object=300):
+    def dbscan_objects(self, min_points_per_object=2000):
         labels = np.array(self.pcd.cluster_dbscan(eps=0.02, min_points=10, print_progress=True))
 
         max_label = labels.max()
@@ -135,10 +168,12 @@ if __name__ == "__main__":
     # Create processor and load/create point cloud
     processor = PointCloud()
 
-    processor.create_point_cloud_from_rgbd(scale_depth=1.0, truncate_depth=0.75)
+    processor.create_point_cloud_from_rgbd(scale_depth=1.0, truncate_depth=1.5)
 
     # Segment the table plane
-    processor.segment_plane(distance_threshold=0.019)
+    processor.segment_plane(distance_threshold=0.02)
+    processor.crop_above_plane(max_height=0.20)
+    processor.crop_sides(x_range=(-0.30, 0.30), y_range=(-0.20, 0.20))
     processor.dbscan_objects()
     processor.save_to_ply()
 
