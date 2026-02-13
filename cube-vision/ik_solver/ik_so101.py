@@ -31,7 +31,13 @@ class IK_SO101:
         self.dt = 0.01  # 100 hertz
 
         # configuring pink off of URDF
-        self.model = pin.buildModelFromUrdf(str(self.URDF_PATH))
+        full_model = pin.buildModelFromUrdf(str(self.URDF_PATH))
+
+        # Build a reduced model with the gripper joint locked at neutral position
+        # so the IK solver only operates on the arm joints
+        q_neutral = pin.neutral(full_model)
+        gripper_joint_id = full_model.getJointId("gripper")
+        self.model = pin.buildReducedModel(full_model, [gripper_joint_id], q_neutral)
         self.data = self.model.createData()
         self.q = pin.neutral(self.model)
 

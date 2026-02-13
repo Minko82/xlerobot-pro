@@ -1,4 +1,4 @@
-from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
+from lerobot.robots.so_follower import SO101Follower as SO100Follower, SO101FollowerConfig as SO100FollowerConfig
 from lerobot.robots.xlerobot import XLerobot, XLerobotConfig
 import numpy as np
 from ik_solver import IK_SO101
@@ -6,18 +6,18 @@ from point_cloud import PointCloud
 from frame_transform import frame_transform
 import time
 
-SERIAL_PORT = "/dev/tty.usbmodem5A680135181"
+SERIAL_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
 
-# Connect to xlerobot
-xlerobot_config = XLerobotConfig(port1=SERIAL_PORT, use_degrees=True)
+# Connect to xlerobot bus1 only (left arm + head motors)
+xlerobot_config = XLerobotConfig()
 xlerobot = XLerobot(xlerobot_config)
-xlerobot.connect()
-# Read head motor positions from XLerobot
-state = xlerobot.get_observation()
-head_pan_deg = float(state["head_motor_1.pos"])
-head_tilt_deg = float(state["head_motor_2.pos"])
-xlerobot.disconnect()
+xlerobot.bus1.connect()
+# Read head motor positions directly from bus1
+head_pos = xlerobot.bus1.sync_read("Present_Position", xlerobot.head_motors)
+head_pan_deg = float(head_pos["head_motor_1"])
+head_tilt_deg = float(head_pos["head_motor_2"])
+xlerobot.bus1.disconnect()
 print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 
 # Connect follower arm for control

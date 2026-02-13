@@ -88,7 +88,7 @@ class FrameTransform:
         """
         p_cam = np.asarray(p_cam, dtype=float).reshape(3)
         T = self.base_T_cam(q)
-        return T.rotation @ p_cam + T.translation
+        return np.asarray(T.rotation, dtype=float) @ p_cam + np.asarray(T.translation, dtype=float).ravel()
 
 
 # -------------------------
