@@ -43,35 +43,13 @@ arm_frame_x, arm_frame_y, arm_frame_z = frame_transform.camera_xyz_to_base_xyz(
 )
 print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
 
-# Test different rotation corrections - uncomment the one to try
-# Option 0: No rotation (use Base frame directly)
-corrected_x = arm_frame_x
-corrected_y = arm_frame_y
-corrected_z = arm_frame_z
-#
-# Option 1: 90° about Z
-# corrected_x = arm_frame_y
-# corrected_y = -arm_frame_x
-# corrected_z = arm_frame_z
-#
-# Option 2: -90° about Z
-# corrected_x = -arm_frame_y
-# corrected_y = arm_frame_x
-# corrected_z = arm_frame_z
-#
-# Option 3: 180° about Z
-# corrected_x = -arm_frame_x
-# corrected_y = -arm_frame_y
-# corrected_z = arm_frame_z
-
-print(f"Corrected for IK solver (so101 base_link): [{corrected_x:.4f}, {corrected_y:.4f}, {corrected_z:.4f}]")
 ik_solve = IK_SO101()
 
 dt = 0.01
 test_dt = 0.1
 
 #trajectory_rad = ik_solve.generate_ik([corrected_x, corrected_y, corrected_z], [0, 0, 0])
-trajectory_rad = ik_solve.generate_ik([0.3, 0.0, 0.0], [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik([arm_frame_x, arm_frame_y, arm_frame_z], [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
 # Move individual joints (degrees)
 RAD2DEG = 180.0 / np.pi
