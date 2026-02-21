@@ -5,6 +5,8 @@ import open3d as o3d
 import numpy as np
 from pathlib import Path
 import json
+import matplotlib
+matplotlib.use('Agg')  # Non-GUI backend; avoids segfault on headless Jetson
 import matplotlib.pyplot as plt
 
 
@@ -46,20 +48,6 @@ class PointCloud:
         print(f"Points <= 0.10: {np.sum(depth_data <= 0.10)}")
         print(f"Points between 0.10 and 0.15: {np.sum((depth_data > 0.10) & (depth_data <= 0.15))}")
         depth_data[depth_data <= min_depth] = 0.0
-        # Convert depth numpy array to open3d image
-        depth_img = o3d.geometry.Image(depth_data.astype(np.float32))
-        print("Depth image created")
-
-        # Create RGBD image
-        rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-            color_img,
-            depth_img,
-            depth_scale=scale_depth,
-            depth_trunc=truncate_depth,
-            convert_rgb_to_intensity=False,
-        )
-        print("RGBD image created")
-
         # Load camera intrinsics
         intrinsic_path = self.captures_dir / "intrinsic_data.json"
         if not intrinsic_path.exists():
@@ -79,8 +67,26 @@ class PointCloud:
         )
         print(o3d_intrinsic)
 
-        # Create point cloud from RGBD image
-        self.pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd, o3d_intrinsic)
+        # Create point cloud manually (avoids Open3D ARM/Jetson segfault in create_from_rgbd_image)
+        color_np = np.asarray(color_img)  # H x W x 3, uint8 RGB
+        h, w = depth_data.shape
+        fx = intrinsics["fx"]
+        fy = intrinsics["fy"]
+        cx = intrinsics["ppx"]
+        cy = intrinsics["ppy"]
+        u, v = np.meshgrid(np.arange(w), np.arange(h))
+        z = depth_data.astype(np.float64)
+        # Zero out points outside [min_depth, truncate_depth]
+        z[(z <= 0) | (z > truncate_depth)] = 0.0
+        mask = z > 0
+        x = ((u - cx) * z / fx)[mask]
+        y = ((v - cy) * z / fy)[mask]
+        z_valid = z[mask]
+        points = np.stack([x, y, z_valid], axis=1)
+        colors = color_np[mask].astype(np.float64) / 255.0
+        self.pcd = o3d.geometry.PointCloud()
+        self.pcd.points = o3d.utility.Vector3dVector(points)
+        self.pcd.colors = o3d.utility.Vector3dVector(colors)
         print(f"Point cloud created with {len(self.pcd.points)} points")
 
     def save_to_ply(self):
@@ -129,16 +135,17 @@ class PointCloud:
     def segment_grippers(self):
         pass
 
-    def dbscan_objects(self, min_points_per_object=2000):
+    def dbscan_objects(self, min_points_per_object=2000, colorize=False):
         labels = np.array(self.pcd.cluster_dbscan(eps=0.02, min_points=10, print_progress=True))
 
         max_label = labels.max()
         print(f"point cloud has {max_label + 1} clusters")
 
-        # Apply colors to visualize clusters
-        colors = plt.get_cmap("tab20")(labels / (max_label if max_label > 0 else 1))
-        colors[labels < 0] = 0
-        self.pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
+        # Apply colors to visualize clusters (skip when not needed; avoids ARM/Open3D segfault)
+        if colorize:
+            colors = plt.get_cmap("tab20")(labels / (max_label if max_label > 0 else 1))
+            colors[labels < 0] = 0
+            self.pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
         # Extract coordinates for each object
         points = np.asarray(self.pcd.points)
@@ -174,7 +181,7 @@ if __name__ == "__main__":
     processor.segment_plane(distance_threshold=0.02)
     processor.crop_above_plane(max_height=0.20)
     processor.crop_sides(x_range=(-0.30, 0.30), y_range=(-0.20, 0.20))
-    processor.dbscan_objects()
+    processor.dbscan_objects(colorize=True)
     processor.save_to_ply()
 
     # processor.dbscan_objects()
