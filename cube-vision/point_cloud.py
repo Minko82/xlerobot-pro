@@ -108,17 +108,7 @@ class PointCloud:
         norm = np.sqrt(a**2 + b**2 + c**2)
         points = np.asarray(self.pcd.points)
         dist = (a * points[:, 0] + b * points[:, 1] + c * points[:, 2] + d) / norm
-        # RANSAC normal direction is arbitrary — take the side with more points as table
-        # Objects above table are on whichever side has fewer points
-        pos_count = np.sum(dist > 0)
-        neg_count = np.sum(dist < 0)
-        if neg_count < pos_count:
-            # fewer points on negative side → objects are there
-            mask = (dist < 0) & (dist > -max_height)
-        else:
-            # fewer points on positive side → objects are there
-            mask = (dist > 0) & (dist < max_height)
-        print(f"Plane dist range: {dist.min():.3f} to {dist.max():.3f}, pos={pos_count}, neg={neg_count}")
+        mask = np.abs(dist) < max_height
         self.pcd = self.pcd.select_by_index(np.where(mask)[0])
         print(f"After crop_above_plane: {len(self.pcd.points)} points")
 
@@ -138,6 +128,8 @@ class PointCloud:
     def dbscan_objects(self, min_points_per_object=2000, colorize=False):
         labels = np.array(self.pcd.cluster_dbscan(eps=0.02, min_points=10, print_progress=True))
 
+        if labels.size == 0 or labels.max() < 0:
+            return []
         max_label = labels.max()
         print(f"point cloud has {max_label + 1} clusters")
 

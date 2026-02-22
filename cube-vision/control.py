@@ -1,6 +1,9 @@
 from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
 from lerobot.robots.xlerobot import XLerobot, XLerobotConfig
+from lerobot.motors.motors_bus import MotorCalibration
 import numpy as np
+import json
+from pathlib import Path
 from ik_solver import IK_SO101
 from point_cloud import PointCloud
 from frame_transform import frame_transform
@@ -8,11 +11,26 @@ import time
 
 SERIAL_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
+HEAD_CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "head.json"
 
 # Connect to bus1 only to read head motor positions
 xlerobot_config = XLerobotConfig(port1=SERIAL_PORT, use_degrees=True)
 xlerobot = XLerobot(xlerobot_config)
 xlerobot.bus1.connect()
+
+# Load head calibration so sync_read returns calibrated degrees
+if not HEAD_CALIBRATION_FILE.exists():
+    raise FileNotFoundError(
+        f"Head calibration not found: {HEAD_CALIBRATION_FILE}\n"
+        "Run calibrate_head.py first."
+    )
+with open(HEAD_CALIBRATION_FILE) as f:
+    head_calib_raw = json.load(f)
+head_calibration = {
+    name: MotorCalibration(**vals) for name, vals in head_calib_raw.items()
+}
+xlerobot.bus1.calibration = head_calibration
+
 head_pos = xlerobot.bus1.sync_read("Present_Position", xlerobot.head_motors)
 head_pan_deg = float(head_pos["head_motor_1"])
 head_tilt_deg = float(head_pos["head_motor_2"])
@@ -28,10 +46,12 @@ robot.connect()
 point_cloud = PointCloud()
 point_cloud.create_point_cloud_from_rgbd()
 point_cloud.segment_plane()
-objects = point_cloud.dbscan_objects()
+objects = point_cloud.dbscan_objects(min_points_per_object=500)
 if not objects:
     raise RuntimeError("No objects detected in point cloud")
-centroid = objects[0]["centroid"]
+# Pick the largest cluster — the cube
+objects.sort(key=lambda o: o["num_points"])
+centroid = objects[-1]["centroid"]
 print(f"Camera centroid (optical frame): {centroid}")
 
 RS_JOINT_KEYS = {
@@ -41,15 +61,22 @@ RS_JOINT_KEYS = {
 arm_frame_x, arm_frame_y, arm_frame_z = frame_transform.camera_xyz_to_base_xyz(
     centroid[0], centroid[1], centroid[2], RS_JOINT_KEYS
 )
-print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+
+# Rotate from xlerobot Base_2 frame to SO101 IK base_link frame (Rz +90°).
+# The xlerobot arm extends along -Y in Base_2, but the SO101 IK URDF
+# expects the arm to extend along +X.
+ik_x = -arm_frame_y
+ik_y = arm_frame_x
+ik_z = arm_frame_z
+print(f"Rotated to SO101 IK frame: [{ik_x:.4f}, {ik_y:.4f}, {ik_z:.4f}]")
 
 ik_solve = IK_SO101()
 
 dt = 0.01
 test_dt = 0.1
 
-#trajectory_rad = ik_solve.generate_ik([corrected_x, corrected_y, corrected_z], [0, 0, 0])
-trajectory_rad = ik_solve.generate_ik([arm_frame_x, arm_frame_y, arm_frame_z], [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik([ik_x, ik_y, ik_z], [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
 # Move individual joints (degrees)
 RAD2DEG = 180.0 / np.pi
