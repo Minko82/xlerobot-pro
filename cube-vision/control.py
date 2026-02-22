@@ -7,6 +7,7 @@ from pathlib import Path
 from ik_solver import IK_SO101
 from point_cloud import PointCloud
 from frame_transform import frame_transform
+from realsense_capture import capture
 import time
 
 SERIAL_PORT = "/dev/ttyACM0"
@@ -41,6 +42,9 @@ print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 config = SO100FollowerConfig(port=SERIAL_PORT, use_degrees=True)
 robot = SO100Follower(config)
 robot.connect()
+
+# Capture fresh RGBD frames from the RealSense
+capture()
 
 # Get coordinate object from the frame of the realsense
 point_cloud = PointCloud()
