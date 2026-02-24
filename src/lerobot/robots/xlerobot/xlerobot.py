@@ -322,33 +322,40 @@ class XLerobot(Robot):
     # ── configure ─────────────────────────────────────────────────────
 
     def configure(self):
+        # Bus A+B (Arms): Safe Envelope — Torque 800, Acceleration 40 (Soft)
         self.bus1.disable_torque()
-        self.bus1.configure_motors()
+        self.bus1.configure_motors(acceleration=40)
         self.bus2.disable_torque()
-        self.bus2.configure_motors()
+        self.bus2.configure_motors(acceleration=40)
+
+        # Bus C (Head + Mobility): Acceleration 20 (Med) for all; torque limits set per group below
         self.bus3.disable_torque()
-        self.bus3.configure_motors()
+        self.bus3.configure_motors(acceleration=20)
 
         for name in self.left_arm_motors:
             self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus1.write("Torque_Limit", name, 800)
             self.bus1.write("P_Coefficient", name, 8)
             self.bus1.write("I_Coefficient", name, 0)
             self.bus1.write("D_Coefficient", name, 43)
 
         for name in self.right_arm_motors:
             self.bus2.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus2.write("Torque_Limit", name, 800)
             self.bus2.write("P_Coefficient", name, 16)
             self.bus2.write("I_Coefficient", name, 0)
             self.bus2.write("D_Coefficient", name, 43)
 
         for name in self.head_motors:
             self.bus3.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus3.write("Torque_Limit", name, 800)
             self.bus3.write("P_Coefficient", name, 16)
             self.bus3.write("I_Coefficient", name, 0)
             self.bus3.write("D_Coefficient", name, 43)
 
         for name in self.base_motors:
             self.bus3.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
+            self.bus3.write("Torque_Limit", name, 220)
 
         self.bus1.enable_torque()
         self.bus2.enable_torque()
