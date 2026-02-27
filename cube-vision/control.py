@@ -1,18 +1,40 @@
-from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
+from lerobot.robots.so_follower import SO100Follower, SO100FollowerConfig
 from lerobot.robots.xlerobot import XLerobot, XLerobotConfig
 from lerobot.motors.motors_bus import MotorCalibration
+from lerobot.motors.feetech.feetech import OperatingMode
 import numpy as np
 import json
 from pathlib import Path
 from ik_solver import IK_SO101
 from point_cloud import PointCloud
-from frame_transform import frame_transform
+from pincer_transform.transforms import build_t_base_camera, camera_to_base
 from realsense_capture import capture
 import time
 
 SERIAL_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
 HEAD_CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "head.json"
+
+
+def apply_limits(robot: SO100Follower, torque: int, acceleration: int, p: int, i: int, d: int):
+    bus = robot.bus
+    motors = list(bus.motors.keys())
+
+    print("Applying motor limits:")
+    print(f"    Torque_Limit = {torque} / 1000")
+    print(f"    Acceleration = {acceleration} / 254")
+    print(f"    P={p}, I={i}, D={d}\n")
+
+    bus.disable_torque()
+    for name in motors:
+        bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
+        bus.write("Torque_Limit", name, torque)
+        bus.write("Acceleration", name, acceleration)
+        bus.write("P_Coefficient", name, p)
+        bus.write("I_Coefficient", name, i)
+        bus.write("D_Coefficient", name, d)
+    bus.enable_torque()
+
 
 # Connect to bus1 only to read head motor positions
 xlerobot_config = XLerobotConfig(port1=SERIAL_PORT, use_degrees=True)
@@ -38,11 +60,12 @@ head_tilt_deg = float(head_pos["head_motor_2"])
 xlerobot.bus1.disconnect()
 print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 
-# Connect follower arm for control
+# Connect follower arm for control (SO101Follower matches the IK solver's conventions)
 config = SO100FollowerConfig(port=SERIAL_PORT, use_degrees=True)
 robot = SO100Follower(config)
 robot.connect()
 
+apply_limits(robot, 200, 10, 8, 0, 32)
 # Capture fresh RGBD frames from the RealSense
 capture()
 
@@ -58,13 +81,11 @@ objects.sort(key=lambda o: o["num_points"])
 centroid = objects[-1]["centroid"]
 print(f"Camera centroid (optical frame): {centroid}")
 
-RS_JOINT_KEYS = {
-    "head_pan_joint": head_pan_deg * DEG2RAD,
-    "head_tilt_joint": head_tilt_deg * DEG2RAD,
-}
-arm_frame_x, arm_frame_y, arm_frame_z = frame_transform.camera_xyz_to_base_xyz(
-    centroid[0], centroid[1], centroid[2], RS_JOINT_KEYS
-)
+q_arm_deg = np.zeros(5)  # arm joints don't affect Base_2 frame placement
+q_head_deg = np.array([head_pan_deg, head_tilt_deg])
+T_base_camera = build_t_base_camera(q_arm_deg, q_head_deg)
+p_base = camera_to_base(centroid, T_base_camera)
+arm_frame_x, arm_frame_y, arm_frame_z = float(p_base[0]), float(p_base[1]), float(p_base[2])
 print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
 
 # Rotate from xlerobot Base_2 frame to SO101 IK base_link frame (Rz +90°).

@@ -3,14 +3,14 @@
         "id": 7,
         "drive_mode": 0,
         "homing_offset": -1635,
-        "range_min": 2045,
-        "range_max": 2051
+        "range_min": 750,
+        "range_max": 3451
     },
     "head_motor_2": {
         "id": 8,
         "drive_mode": 0,
-        "homing_offset": -2045,
-        "range_min": 825,
-        "range_max": 2855
+        "homing_offset": 1978,
+        "range_min": 897,
+        "range_max": 2918
     }
 }
