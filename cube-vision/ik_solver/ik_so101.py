@@ -3,64 +3,68 @@ import numpy as np
 from pathlib import Path
 
 import pinocchio as pin
-from pinocchio.visualize import MeshcatVisualizer
 
 import pink
 from pink import solve_ik
 from pink.tasks import FrameTask, PostureTask
 
-import meshcat.geometry as g
-import meshcat.transformations as tf
-
 try:
     from pinocchio.visualize import MeshcatVisualizer
+    import meshcat.geometry as g
+    import meshcat.transformations as tf
 except ModuleNotFoundError:
     MeshcatVisualizer = None
+
+# Path to the MJCF model (shared with frame_transform)
+_MJCF_PATH = Path(__file__).resolve().parent.parent / "assets" / "xlerobot.xml"
+
+# Joints to keep in the reduced model (second arm only)
+_ARM_JOINTS = {"Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"}
 
 
 class IK_SO101:
     def __init__(self) -> None:
-        # File paths for model urdf and frame data
-        self.BASE_DIR = Path(__file__).resolve().parent
-        self.URDF_PATH = str(self.BASE_DIR / "SO-ARM100" / "Simulation" / "SO101" / "so101_new_calib.urdf")
-        self.MESH_DIR = str(self.BASE_DIR / "SO-ARM100" / "Simulation" / "SO101")
-        # ID of end effector
-        self.EE_FRAME = "gripper_frame_link"
-
-        # Sets change in time per control loop
-        self.dt = 0.01  # 100 hertz
-
-        # configuring pink off of URDF
-        full_model = pin.buildModelFromUrdf(str(self.URDF_PATH))
-
-        # Build a reduced model with the gripper joint locked at neutral position
-        # so the IK solver only operates on the arm joints
+        # Build reduced model from MJCF with only the second arm's 5 joints
+        full_model = pin.buildModelFromMJCF(str(_MJCF_PATH))
         q_neutral = pin.neutral(full_model)
-        gripper_joint_id = full_model.getJointId("gripper")
-        self.model = pin.buildReducedModel(full_model, [gripper_joint_id], q_neutral)
-        self.data = self.model.createData()
-        self.q = pin.neutral(self.model)
 
-        # # Set wrist roll to 90 degrees (π/2 radians) for sideways orientation
-        # jid = self.model.getJointId("wrist_roll")
-        # idx = self.model.joints[jid].idx_q
-        # self.q[idx] = np.pi / 2
+        lock_ids = [
+            i for i in range(1, full_model.njoints)
+            if full_model.names[i] not in _ARM_JOINTS
+        ]
+        self.model = pin.buildReducedModel(full_model, lock_ids, q_neutral)
+        self.data = self.model.createData()
+
+        # EE frame
+        self.EE_FRAME = "Fixed_Jaw_2"
+
+        # Precompute the fixed Base_2 -> world transform (for converting targets)
+        q = pin.neutral(self.model)
+        pin.forwardKinematics(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        base2_oMf = self.data.oMf[self.model.getFrameId("Base_2")]
+        self._base2_R = base2_oMf.rotation.copy()
+        self._base2_t = base2_oMf.translation.copy()
+
+        # IK timestep
+        self.dt = 0.01  # 100 Hz
+
+        # Initial configuration
+        self.q = pin.neutral(self.model)
         self.configuration = pink.Configuration(self.model, self.data, self.q)
 
-        # pink tasks that can be used to create sets of frames to reach the final goal position
-        #
-        # ee_task gets gets end effector to desired position
+        # Pink tasks
         self.ee_task = FrameTask(self.EE_FRAME, position_cost=10.0, orientation_cost=0.0)
-        # posture tasks describes what position it should bias towards while moving
         self.posture_task = PostureTask(cost=1e-2)
-        # make a list of the needed tasks
         self.tasks = [self.ee_task, self.posture_task]
 
-        # self.gripper_offset = np.array([-0.015, 0.0, 0.03])
+    def base2_to_world(self, p_base2: np.ndarray) -> np.ndarray:
+        """Convert a point from Base_2 frame to the reduced model's world frame."""
+        return self._base2_R @ np.asarray(p_base2) + self._base2_t
 
-    def generate_ik(  # TODO: Add support for target position for better grasping
+    def generate_ik(
         self,
-        target_xyz: list[float],  # [x, y, z]
+        target_xyz: list[float],  # [x, y, z] in reduced model world frame
         gripper_offset_xyz: list[float],  # [x, y, z]
         position_tolerance: float = 1e-3,
         max_timesteps: int = 500,
@@ -75,117 +79,81 @@ class IK_SO101:
         ee_frame_id = self.model.getFrameId(self.EE_FRAME)
 
         for step in range(max_timesteps):
-            # calculates forward kinematics
             pin.forwardKinematics(self.model, self.data, self.configuration.q)
             pin.updateFramePlacements(self.model, self.data)
 
-            # pin fills data.omf with forward kinematics and frame placements
             transform_current = self.data.oMf[ee_frame_id]
-
-            # error found by comparing target transform to current location
             pos_error = target_transform.translation - transform_current.translation
 
-            # if we enter within the position tolerance, break and return trajectory
             if np.linalg.norm(pos_error) < position_tolerance:
                 break
 
             self.posture_task.set_target(self.configuration.q)
 
-            # wrapped in try except so impossible calcs exit for safety
             try:
                 dq = solve_ik(self.configuration, self.tasks, self.dt, solver="quadprog")
             except Exception as e:
                 print(f"IK Solver Failed at Step{step}. Error: {e}")
                 break
 
-            # clipping
             dq_max = 1.0
             dq = np.clip(dq, -dq_max, dq_max)
-
-            # damping
             dq *= 0.2
 
-            # update  q in place
             self.configuration.integrate_inplace(dq, self.dt)
-            # add latest joint positions to list of steps
             trajectory.append(self.configuration.q.copy())
 
         return trajectory
 
-    def visualize_ik(
-        self,
-        trajectory: list,
-        object_xyz,
-    ):
-        if MeshcatVisualizer is not None:
-            # generates physical model
-            visual_model = pin.buildGeomFromUrdf(
-                self.model,
-                self.URDF_PATH,
-                pin.GeometryType.VISUAL,
-                package_dirs=[self.MESH_DIR],
-            )
-            # generates collisions
-            collision_model = pin.buildGeomFromUrdf(
-                self.model,
-                str(self.URDF_PATH),
-                pin.GeometryType.COLLISION,
-                package_dirs=[str(self.MESH_DIR)],
-            )
-
-            ee_frame_id = self.model.getFrameId(self.EE_FRAME)
-
-            # initiates visualizer, displays model
-            viz = MeshcatVisualizer(self.model, collision_model, visual_model)
-            viz.initViewer(open=True)
-            viz.loadViewerModel()
-            viz.display(self.q)
-
-            # creates cube at object target point
-            viewer = viz.viewer
-            cube = g.Box([0.017, 0.017, 0.017])  # .17 cm cube
-            material = g.MeshLambertMaterial(color=0x00FFFF, opacity=0.8)
-            cube_pos = np.array(object_xyz)
-            viewer["target_cube"].set_object(cube, material)
-            viewer["target_cube"].set_transform(tf.translation_matrix(cube_pos))
-
-            viz.viewer["ee_point"].set_object(g.Sphere(0.005), g.MeshLambertMaterial(color=0xFF0000))
-
-            pos = self.data.oMf[ee_frame_id].translation
-            viz.viewer["ee_point"].set_transform(tf.translation_matrix(pos))
-
-            # runs through the generated trajectory and visualizes it
-            for q_step in trajectory:
-                viz.display(q_step)
-                pin.forwardKinematics(self.model, self.data, q_step)
-                pin.updateFramePlacements(self.model, self.data)
-                time.sleep(self.dt)
-                ee_pos = self.data.oMf[ee_frame_id].translation
-                viz.viewer["ee_point"].set_transform(tf.translation_matrix(ee_pos))
-
-        else:
+    def visualize_ik(self, trajectory: list, object_xyz):
+        if MeshcatVisualizer is None:
             print("Meshcat failed to import.")
+            return
+
+        ee_frame_id = self.model.getFrameId(self.EE_FRAME)
+
+        collision_model = pin.GeometryModel()
+        visual_model = pin.GeometryModel()
+        viz = MeshcatVisualizer(self.model, collision_model, visual_model)
+        viz.initViewer(open=True)
+        viz.loadViewerModel()
+        viz.display(self.q)
+
+        viewer = viz.viewer
+        cube = g.Box([0.017, 0.017, 0.017])
+        material = g.MeshLambertMaterial(color=0x00FFFF, opacity=0.8)
+        cube_pos = np.array(object_xyz)
+        viewer["target_cube"].set_object(cube, material)
+        viewer["target_cube"].set_transform(tf.translation_matrix(cube_pos))
+
+        viz.viewer["ee_point"].set_object(g.Sphere(0.005), g.MeshLambertMaterial(color=0xFF0000))
+        pos = self.data.oMf[ee_frame_id].translation
+        viz.viewer["ee_point"].set_transform(tf.translation_matrix(pos))
+
+        for q_step in trajectory:
+            viz.display(q_step)
+            pin.forwardKinematics(self.model, self.data, q_step)
+            pin.updateFramePlacements(self.model, self.data)
+            time.sleep(self.dt)
+            ee_pos = self.data.oMf[ee_frame_id].translation
+            viz.viewer["ee_point"].set_transform(tf.translation_matrix(ee_pos))
 
 
 if __name__ == "__main__":
-    # 1. Create the solver
     arm = IK_SO101()
 
-    # 2. target position (x, y, z) in meters
-    target = [0.30, 0.0, 0.0125]
+    # Target in Base_2 frame, then convert to world
+    target_base2 = [0.0, -0.30, 0.01]
+    target_world = arm.base2_to_world(target_base2).tolist()
 
-    gripper_offset = [0.0, 0.0, 0.0]
+    print(f"Target in Base_2 frame: {target_base2}")
+    print(f"Target in world frame:  {target_world}")
+    print(f"Generating IK trajectory...")
 
-    print(f"Generating IK trajectory to: {target}")
-
-    # 3. Solve
-    traj = arm.generate_ik(target_xyz=target, gripper_offset_xyz=gripper_offset)
+    traj = arm.generate_ik(target_xyz=target_world, gripper_offset_xyz=[0, 0, 0])
 
     if len(traj) > 0:
         print(f"Success! Trajectory has {len(traj)} steps.")
-        print("Opening visualizer...")
-
-        # 4. Visualize
-        arm.visualize_ik(traj, object_xyz=target)
+        arm.visualize_ik(traj, object_xyz=target_world)
     else:
         print("IK Failed or target out of reach.")

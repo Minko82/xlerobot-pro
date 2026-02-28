@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from ik_solver import IK_SO101
 from point_cloud import PointCloud
-from pincer_transform.transforms import build_t_base_camera, camera_to_base
+from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
 import time
 
@@ -81,33 +81,42 @@ objects.sort(key=lambda o: o["num_points"])
 centroid = objects[-1]["centroid"]
 print(f"Camera centroid (optical frame): {centroid}")
 
-q_arm_deg = np.zeros(5)  # arm joints don't affect Base_2 frame placement
-q_head_deg = np.array([head_pan_deg, head_tilt_deg])
-T_base_camera = build_t_base_camera(q_arm_deg, q_head_deg)
-p_base = camera_to_base(centroid, T_base_camera)
-arm_frame_x, arm_frame_y, arm_frame_z = float(p_base[0]), float(p_base[1]), float(p_base[2])
+joint_values = {
+    "head_pan_joint": head_pan_deg * DEG2RAD,
+    "head_tilt_joint": head_tilt_deg * DEG2RAD,
+}
+arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
+    centroid[0], centroid[1], centroid[2], joint_values,
+)
 print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
-
-# Rotate from xlerobot Base_2 frame to SO101 IK base_link frame (Rz +90°).
-# The xlerobot arm extends along -Y in Base_2, but the SO101 IK URDF
-# expects the arm to extend along +X.
-ik_x = -arm_frame_y
-ik_y = arm_frame_x
-ik_z = arm_frame_z
-print(f"Rotated to SO101 IK frame: [{ik_x:.4f}, {ik_y:.4f}, {ik_z:.4f}]")
 
 ik_solve = IK_SO101()
 
-dt = 0.01
-test_dt = 0.1
+# Convert Base_2 frame coordinates to the IK model's world frame (no manual rotation needed)
+target_world = ik_solve.base2_to_world(np.array([arm_frame_x, arm_frame_y, arm_frame_z]))
+print(f"IK target (world frame): [{target_world[0]:.4f}, {target_world[1]:.4f}, {target_world[2]:.4f}]")
 
-trajectory_rad = ik_solve.generate_ik([ik_x, ik_y, ik_z], [0, 0, 0])
+dt = 0.01
+
+trajectory_rad = ik_solve.generate_ik(target_world.tolist(), [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
-# Move individual joints (degrees)
+
+
+def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
+    """Convert MJCF joint angles (degrees) to motor convention (degrees).
+
+    Joint order: Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R
+    """
+    out = q_deg.copy()
+    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    return out
+
+
 RAD2DEG = 180.0 / np.pi
 traj_rad_stack = np.stack(trajectory_rad)
-# Reduced model has gripper locked out; q shape is (5,): shoulder_pan through wrist_roll
-trajectory = traj_rad_stack * RAD2DEG
+# Convert MJCF radians -> degrees -> motor convention
+trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
 
 ARM_JOINT_KEYS = [
     "shoulder_pan.pos",
