@@ -1,0 +1,16 @@
+{
+    "head_motor_1": {
+        "id": 7,
+        "drive_mode": 0,
+        "homing_offset": -1635,
+        "range_min": 2045,
+        "range_max": 2051
+    },
+    "head_motor_2": {
+        "id": 8,
+        "drive_mode": 0,
+        "homing_offset": -2045,
+        "range_min": 825,
+        "range_max": 2855
+    }
+}
