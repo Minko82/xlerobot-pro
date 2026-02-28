@@ -1,26 +1,26 @@
 # =============================================================================
-# OLD WIRING DESIGN
-# Bus 1 (port1 = /dev/xle_right): Motors 1-6 = left arm, Motors 7-8 = head
-# Bus 2 (port2 = /dev/xle_left):  Motors 1-6 = right arm, Motors 7-9 = base wheels
+# NEW WIRING DESIGN
+# Bus 1 (port1 = /dev/xle_arms): Motors 1-6 = left arm, Motors 7-12 = right arm
+# Bus 2 (port2 = /dev/xle_head): Motors 1-2 = head, Motors 3-5 = base wheels
 # =============================================================================
-
-# To Run on the host
-'''
-PYTHONPATH=src python -m lerobot.robots.xlerobot.xlerobot_host --robot.id=my_xlerobot
-'''
 
 # To Run the teleop:
 '''
-PYTHONPATH=src python -m examples.xlerobot.teleoperate_XBOX
+python examples/5_xlerobot_teleop_xbox_new_wiring.py
 '''
+
+import sys
+import os
+# Ensure xle-robot/src is first on the path so the local lerobot package is used
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 
 import time
 import numpy as np
 import math
 import pygame
 
-from lerobot.robots.xlerobot import XLerobotConfig, XLerobot
-#from lerobot.utils.robot_utils import busy_wait
+from lerobot.robots.xlerobot import XLerobotNewWiringConfig
+from lerobot.robots.xlerobot.xlerobot_new_wiring import XLerobotNewWiring
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
 
@@ -172,7 +172,7 @@ class SimpleTeleopArm:
             'wrist_roll': 0.0,
             'gripper': 0.0
         }
-    
+
     def move_to_initial_position(self, robot, initial_obs):
         print(f"[{self.prefix}] Moving to Initial Position for safe exit...")
         self.target_positions = {
@@ -185,19 +185,19 @@ class SimpleTeleopArm:
         }
         action = self.p_control_action(robot)
         robot.send_action(action)
-    
+
     def move_to_zero_position(self, robot):
         print(f"[{self.prefix}] Moving to Zero Position: {self.zero_pos} ......")
-        self.target_positions = self.zero_pos.copy()  # Use copy to avoid reference issues
-        
+        self.target_positions = self.zero_pos.copy()
+
         # Reset kinematic variables to their initial state
         self.current_x = 0.1629
         self.current_y = 0.1131
         self.pitch = 0.0
-        
+
         # Don't let handle_keys recalculate wrist_flex - set it explicitly
         self.target_positions["wrist_flex"] = 0.0
-        
+
         action = self.p_control_action(robot)
         robot.send_action(action)
 
@@ -215,14 +215,14 @@ class SimpleTeleopArm:
         if key_state.get('wrist_roll-'):
             self.target_positions["wrist_roll"] -= self.degree_step
             print(f"[{self.prefix}] wrist_roll: {self.target_positions['wrist_roll']}")
-        
+
         # Gripper control: analog trigger maps proportionally (0=open/90deg, 1=closed/2deg)
         gripper_analog = key_state.get('gripper_analog', 0.0)
         gripper_pos = 90 - (gripper_analog * 88)
         self.target_positions["gripper"] = gripper_pos
         if gripper_analog > 0.05:
             print(f"[{self.prefix}] gripper: {gripper_pos:.1f} (trigger: {gripper_analog:.2f})")
-        
+
         if key_state.get('pitch+'):
             self.pitch += self.degree_step
             print(f"[{self.prefix}] pitch: {self.pitch}")
@@ -260,7 +260,6 @@ class SimpleTeleopArm:
             -self.target_positions["elbow_flex"]
             + self.pitch
         )
-        # print(f"[{self.prefix}] wrist_flex: {self.target_positions['wrist_flex']}")
 
     def p_control_action(self, robot):
         obs = robot.get_observation()
@@ -271,7 +270,7 @@ class SimpleTeleopArm:
             control = self.kp * error
             action[f"{self.joint_map[j]}.pos"] = current[j] + control
         return action
-    
+
 
 # --- XBOX Controller Mapping ---
 def get_xbox_key_state(joystick, keymap):
@@ -282,7 +281,7 @@ def get_xbox_key_state(joystick, keymap):
     axes = [joystick.get_axis(i) for i in range(joystick.get_numaxes())]
     buttons = [joystick.get_button(i) for i in range(joystick.get_numbuttons())]
     hats = joystick.get_hat(0) if joystick.get_numhats() > 0 else (0, 0)
-    
+
     # Get stick pressed states
     left_stick_pressed = bool(buttons[11]) if len(buttons) > 11 else False
     right_stick_pressed = bool(buttons[12]) if len(buttons) > 12 else False
@@ -327,7 +326,7 @@ def get_xbox_key_state(joystick, keymap):
             state[action] = (not left_stick_pressed) and (not lb_pressed) and (axes[0] < -0.5) if len(axes) > 0 else False
         elif control == 'left_stick_right':
             state[action] = (not left_stick_pressed) and (not lb_pressed) and (axes[0] > 0.5) if len(axes) > 0 else False
-        # Right stick controls (when not pressed) - Fixed axis mapping
+        # Right stick controls (when not pressed)
         elif control == 'right_stick_up':
             state[action] = (not right_stick_pressed) and (not rb_pressed) and (axes[4] < -0.5) if len(axes) > 4 else False
         elif control == 'right_stick_down':
@@ -341,7 +340,7 @@ def get_xbox_key_state(joystick, keymap):
             state[action] = left_stick_pressed and (not lb_pressed) and (axes[0] > 0.5) if len(axes) > 0 else False
         elif control == 'left_stick_pressed_left':
             state[action] = left_stick_pressed and (not lb_pressed) and (axes[0] < -0.5) if len(axes) > 0 else False
-        # Right stick pressed controls - Fixed axis mapping
+        # Right stick pressed controls
         elif control == 'right_stick_pressed_right':
             state[action] = right_stick_pressed and (not rb_pressed) and (axes[3] > 0.5) if len(axes) > 3 else False
         elif control == 'right_stick_pressed_left':
@@ -375,10 +374,10 @@ def get_base_action(joystick, robot):
     # Read controller state
     buttons = [joystick.get_button(i) for i in range(joystick.get_numbuttons())]
     hats = joystick.get_hat(0) if joystick.get_numhats() > 0 else (0, 0)
-    
+
     # Get pressed keys for base control
     pressed_keys = set()
-    
+
     # Map controller inputs to keyboard-like keys for base control
     if hats[1] == 1:   # D-pad up
         pressed_keys.add('i')  # Forward
@@ -388,11 +387,11 @@ def get_base_action(joystick, robot):
         pressed_keys.add('u')  # Rotate left
     if hats[0] == 1:   # D-pad right
         pressed_keys.add('o')  # Rotate right
-    
+
     # Convert to numpy array and get base action
     keyboard_keys = np.array(list(pressed_keys))
     base_action = robot._from_keyboard_to_base_action(keyboard_keys) or {}
-    
+
     return base_action
 
 def get_base_speed_control(joystick):
@@ -402,16 +401,16 @@ def get_base_speed_control(joystick):
     """
     # Read controller state
     buttons = [joystick.get_button(i) for i in range(joystick.get_numbuttons())]
-    
+
     # Get LB and RB states
     lb_pressed = bool(buttons[4]) if len(buttons) > 4 else False
     rb_pressed = bool(buttons[5]) if len(buttons) > 5 else False
-    
+
     # Get current speed level from global variable
     global current_base_speed_level
     if 'current_base_speed_level' not in globals():
         current_base_speed_level = 1  # Default speed level
-    
+
     # Speed control logic
     if lb_pressed and not rb_pressed:
         # LB pressed alone - decrease speed
@@ -423,18 +422,18 @@ def get_base_speed_control(joystick):
         if current_base_speed_level < 3:
             current_base_speed_level += 1
             print(f"[BASE] Speed increased to level {current_base_speed_level}")
-    
+
     # Map speed level to multiplier
     speed_multiplier = float(current_base_speed_level)
-    
+
     return speed_multiplier
 
 
 
 def main():
     FPS = 30
-    robot_config = XLerobotConfig()
-    robot = XLerobot(robot_config)
+    robot_config = XLerobotNewWiringConfig()
+    robot = XLerobotNewWiring(robot_config)
     try:
         robot.connect()
         print(f"[MAIN] Successfully connected to robot")
@@ -444,7 +443,7 @@ def main():
         print(robot)
         return
 
-    init_rerun(session_name="xlerobot_teleop_xbox")
+    init_rerun(session_name="xlerobot_teleop_xbox_new_wiring")
 
     # Init XBOX controller
     pygame.init()
@@ -465,7 +464,7 @@ def main():
 
     # Init the arm and head instances
     obs = robot.get_observation()
-    initial_obs = obs.copy() 
+    initial_obs = obs.copy()
     kin_left = SO101Kinematics()
     kin_right = SO101Kinematics()
     left_arm = SimpleTeleopArm(kin_left, LEFT_JOINT_MAP, obs, prefix="left")
@@ -481,11 +480,11 @@ def main():
             pygame.event.pump()
             left_key_state = get_xbox_key_state(joystick, LEFT_KEYMAP)
             right_key_state = get_xbox_key_state(joystick, RIGHT_KEYMAP)
-            
+
             # Check for global reset (back button)
             buttons = [joystick.get_button(i) for i in range(joystick.get_numbuttons())]
-            global_reset = bool(buttons[8]) if len(buttons) > 8 else False  # Share button on PS controller
-            
+            global_reset = bool(buttons[8]) if len(buttons) > 8 else False
+
             # Handle global reset for all components
             if global_reset:
                 print("[MAIN] Global reset triggered!")
@@ -493,9 +492,9 @@ def main():
                 right_arm.move_to_initial_position(robot, initial_obs)
                 head_control.move_to_initial_position(robot, initial_obs)
                 continue
-                
+
             # Check for exit (start button)
-            start_pressed = bool(buttons[9]) if len(buttons) > 9 else False  # Options button on PS controller
+            start_pressed = bool(buttons[9]) if len(buttons) > 9 else False
             if start_pressed:
                 print("[MAIN] Safe exit triggered! Returning to initial position...")
                 left_arm.move_to_initial_position(robot, initial_obs)
@@ -516,7 +515,7 @@ def main():
             # Get base action and speed control from controller
             base_action = get_base_action(joystick, robot)
             speed_multiplier = get_base_speed_control(joystick)
-            
+
             # Apply speed multiplier to base actions if they exist
             if base_action:
                 for key in base_action:
