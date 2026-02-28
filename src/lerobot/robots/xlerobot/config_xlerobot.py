@@ -50,9 +50,14 @@ def xlerobot_cameras_config() -> dict[str, CameraConfig]:
 @RobotConfig.register_subclass("xlerobot")
 @dataclass
 class XLerobotConfig(RobotConfig):
-    
-    port1: str = "/dev/xle_right"  # port to connect to the bus (so101 + head camera)
-    port2: str = "/dev/xle_left"  # port to connect to the bus (same as lekiwi setup)
+    """
+    OLD WIRING DESIGN
+    Bus 1 (port1): Motors 1-6 = left arm, Motors 7-8 = head
+    Bus 2 (port2): Motors 1-6 = right arm, Motors 7-9 = base wheels
+    """
+
+    port1: str = "/dev/xle_right"  # Bus 1: left arm (1-6) + head (7-8)
+    port2: str = "/dev/xle_left"   # Bus 2: right arm (1-6) + base wheels (7-9)
     disable_torque_on_disconnect: bool = True
 
     # `max_relative_target` limits the magnitude of the relative positional target vector for safety purposes.
@@ -128,3 +133,40 @@ class XLerobotClientConfig(RobotConfig):
 
     polling_timeout_ms: int = 15
     connect_timeout_s: int = 5
+
+
+@RobotConfig.register_subclass("xlerobot_new_wiring")
+@dataclass
+class XLerobotNewWiringConfig(RobotConfig):
+    """
+    NEW WIRING DESIGN
+    Bus 1 (port1): Motors 1-6 = left arm, Motors 7-12 = right arm
+    Bus 2 (port2): Motors 1-2 = head, Motors 3-5 = base wheels
+    """
+
+    port1: str = "/dev/xle_arms"   # Bus 1: left arm (1-6) + right arm (7-12)
+    port2: str = "/dev/xle_head"   # Bus 2: head (1-2) + base wheels (3-5)
+    disable_torque_on_disconnect: bool = True
+
+    max_relative_target: int | None = None
+
+    cameras: dict[str, CameraConfig] = field(default_factory=xlerobot_cameras_config)
+
+    use_degrees: bool = False
+
+    teleop_keys: dict[str, str] = field(
+        default_factory=lambda: {
+            # Movement
+            "forward": "i",
+            "backward": "k",
+            "left": "j",
+            "right": "l",
+            "rotate_left": "u",
+            "rotate_right": "o",
+            # Speed control
+            "speed_up": "n",
+            "speed_down": "m",
+            # quit teleop
+            "quit": "b",
+        }
+    )
