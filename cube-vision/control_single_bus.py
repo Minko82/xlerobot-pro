@@ -4,7 +4,7 @@ import numpy as np
 import json
 from pathlib import Path
 from ik_solver import IK_SO101
-from point_cloud import PointCloud
+from color_detect import detect_object
 from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
 import time
@@ -113,16 +113,8 @@ apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
 # Capture fresh RGBD frames from the RealSense
 capture()
 
-# Get coordinate object from the frame of the realsense
-point_cloud = PointCloud()
-point_cloud.create_point_cloud_from_rgbd()
-point_cloud.segment_plane()
-objects = point_cloud.dbscan_objects(min_points_per_object=500)
-if not objects:
-    raise RuntimeError("No objects detected in point cloud")
-# Pick the largest cluster — the cube
-objects.sort(key=lambda o: o["num_points"])
-centroid = objects[-1]["centroid"]
+# Detect object by color (change color= to "red", "green", or "blue" as needed)
+centroid = detect_object(color="red")
 print(f"Camera centroid (optical frame): {centroid}")
 
 joint_values = {
