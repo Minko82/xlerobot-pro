@@ -9,17 +9,21 @@ from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
 import time
 
-ARM_PORT = "/dev/ttyACM0"
-HEAD_PORT = "/dev/ttyACM1"
+# All motors (head IDs 1-2, arm IDs 7-12) on the same bus
+BUS_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
-HEAD_CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "head.json"
+CALIBRATION_DIR = Path(__file__).resolve().parent / "calibration"
 
 norm_mode_body = MotorNormMode.DEGREES
 
-# Right arm bus (IDs 7-12) on ACM0
-arm_bus = FeetechMotorsBus(
-    port=ARM_PORT,
+# Single bus with head (IDs 1-2) and arm (IDs 7-12)
+bus = FeetechMotorsBus(
+    port=BUS_PORT,
     motors={
+        # Head motors
+        "head_motor_1": Motor(1, "sts3215", norm_mode_body),
+        "head_motor_2": Motor(2, "sts3215", norm_mode_body),
+        # Right arm motors
         "shoulder_pan":  Motor(7,  "sts3215", norm_mode_body),
         "shoulder_lift": Motor(8,  "sts3215", norm_mode_body),
         "elbow_flex":    Motor(9,  "sts3215", norm_mode_body),
@@ -28,38 +32,63 @@ arm_bus = FeetechMotorsBus(
         "gripper":       Motor(12, "sts3215", MotorNormMode.RANGE_0_100),
     },
 )
-arm_bus.connect()
+bus.connect()
 
-# Head bus (IDs 1-2) on ACM1
-head_bus = FeetechMotorsBus(
-    port=HEAD_PORT,
-    motors={
-        "head_motor_1": Motor(1, "sts3215", norm_mode_body),
-        "head_motor_2": Motor(2, "sts3215", norm_mode_body),
-    },
-)
-head_bus.connect()
+# Load or create calibration for all motors
+CALIBRATION_FILE = CALIBRATION_DIR / "single_bus.json"
+if CALIBRATION_FILE.exists():
+    with open(CALIBRATION_FILE) as f:
+        calib_raw = json.load(f)
+    bus.calibration = {
+        name: MotorCalibration(**vals) for name, vals in calib_raw.items()
+    }
+    print(f"Loaded calibration from {CALIBRATION_FILE}")
+else:
+    print("No calibration file found. Running calibration...")
+    all_motors = list(bus.motors.keys())
+    bus.disable_torque(all_motors)
 
-# Load head calibration so sync_read returns calibrated degrees
-if not HEAD_CALIBRATION_FILE.exists():
-    raise FileNotFoundError(
-        f"Head calibration not found: {HEAD_CALIBRATION_FILE}\n"
-        "Run calibrate_head.py first."
-    )
-with open(HEAD_CALIBRATION_FILE) as f:
-    head_calib_raw = json.load(f)
-head_bus.calibration = {
-    name: MotorCalibration(**vals) for name, vals in head_calib_raw.items()
-}
+    input("\n>>> Move ALL motors to the MIDDLE of their range of motion, then press ENTER...")
+    homing_offsets = bus.set_half_turn_homings(all_motors)
+    print(f"Homing offsets set: {homing_offsets}")
 
-# Read head positions
-head_pos = head_bus.sync_read("Present_Position", ["head_motor_1", "head_motor_2"])
+    print("\n>>> Move ALL motors through their FULL range of motion.")
+    input("    Move each joint to both extremes. Press ENTER when done...")
+    range_mins, range_maxes = bus.record_ranges_of_motion(all_motors)
+    print(f"Range mins: {range_mins}")
+    print(f"Range maxes: {range_maxes}")
+
+    calib_raw = {}
+    for name in all_motors:
+        motor = bus.motors[name]
+        calib_raw[name] = {
+            "id": motor.id,
+            "drive_mode": 0,
+            "homing_offset": homing_offsets[name],
+            "range_min": range_mins[name],
+            "range_max": range_maxes[name],
+        }
+
+    CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CALIBRATION_FILE, "w") as f:
+        json.dump(calib_raw, f, indent=4)
+    print(f"Calibration saved to {CALIBRATION_FILE}")
+
+    bus.calibration = {
+        name: MotorCalibration(**vals) for name, vals in calib_raw.items()
+    }
+
+# Read head positions (calibrated)
+head_pos = bus.sync_read("Present_Position", ["head_motor_1", "head_motor_2"])
 head_pan_deg = float(head_pos["head_motor_1"])
 head_tilt_deg = float(head_pos["head_motor_2"])
 print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 
-# Apply limits to right arm
-arm_motors = list(arm_bus.motors.keys())
+# Apply limits to right arm only
+arm_motors = [
+    "shoulder_pan", "shoulder_lift", "elbow_flex",
+    "wrist_flex", "wrist_roll", "gripper",
+]
 
 
 def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d: int):
@@ -79,7 +108,7 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(arm_bus, arm_motors, 200, 10, 8, 0, 32)
+apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
@@ -151,7 +180,7 @@ goals = [traj_to_goal(q_deg) for q_deg in trajectory]
 
 for goal in goals:
     goal["gripper"] = 100.0
-    arm_bus.sync_write("Goal_Position", goal)
+    bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
 # Close gripper
@@ -159,8 +188,7 @@ hold_goal = {k: v for k, v in goals[-1].items() if k != "gripper"}
 for grip in range(100, 5, -5):
     goal = dict(hold_goal)
     goal["gripper"] = float(grip)
-    arm_bus.sync_write("Goal_Position", goal)
+    bus.sync_write("Goal_Position", goal)
     time.sleep(0.05)
 
-arm_bus.disconnect()
-head_bus.disconnect()
+bus.disconnect()
