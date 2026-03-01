@@ -1,82 +1,21 @@
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
-from lerobot.motors import Motor, MotorCalibration, MotorNormMode
+from lerobot.motors import MotorCalibration, MotorNormMode
 import numpy as np
-import json
-from pathlib import Path
 from ik_solver import IK_SO101
 from color_detect import detect_object
 from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
+from calibrate import MOTOR_DEFS, BUS_PORT, load_or_run_calibration
 import time
 
-# All motors (head IDs 1-2, arm IDs 7-12) on the same bus
-BUS_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
-CALIBRATION_DIR = Path(__file__).resolve().parent / "calibration"
-
-norm_mode_body = MotorNormMode.DEGREES
 
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
-bus = FeetechMotorsBus(
-    port=BUS_PORT,
-    motors={
-        # Head motors
-        "head_motor_1": Motor(1, "sts3215", norm_mode_body),
-        "head_motor_2": Motor(2, "sts3215", norm_mode_body),
-        # Right arm motors
-        "shoulder_pan":  Motor(7,  "sts3215", norm_mode_body),
-        "shoulder_lift": Motor(8,  "sts3215", norm_mode_body),
-        "elbow_flex":    Motor(9,  "sts3215", norm_mode_body),
-        "wrist_flex":    Motor(10, "sts3215", norm_mode_body),
-        "wrist_roll":    Motor(11, "sts3215", norm_mode_body),
-        "gripper":       Motor(12, "sts3215", MotorNormMode.RANGE_0_100),
-    },
-)
+bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
 bus.connect()
 
 # Load or create calibration for all motors
-CALIBRATION_FILE = CALIBRATION_DIR / "single_bus.json"
-if CALIBRATION_FILE.exists():
-    with open(CALIBRATION_FILE) as f:
-        calib_raw = json.load(f)
-    bus.calibration = {
-        name: MotorCalibration(**vals) for name, vals in calib_raw.items()
-    }
-    print(f"Loaded calibration from {CALIBRATION_FILE}")
-else:
-    print("No calibration file found. Running calibration...")
-    all_motors = list(bus.motors.keys())
-    bus.disable_torque(all_motors)
-
-    input("\n>>> Move ALL motors to the MIDDLE of their range of motion, then press ENTER...")
-    homing_offsets = bus.set_half_turn_homings(all_motors)
-    print(f"Homing offsets set: {homing_offsets}")
-
-    print("\n>>> Move ALL motors through their FULL range of motion.")
-    input("    Move each joint to both extremes. Press ENTER when done...")
-    range_mins, range_maxes = bus.record_ranges_of_motion(all_motors)
-    print(f"Range mins: {range_mins}")
-    print(f"Range maxes: {range_maxes}")
-
-    calib_raw = {}
-    for name in all_motors:
-        motor = bus.motors[name]
-        calib_raw[name] = {
-            "id": motor.id,
-            "drive_mode": 0,
-            "homing_offset": homing_offsets[name],
-            "range_min": range_mins[name],
-            "range_max": range_maxes[name],
-        }
-
-    CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CALIBRATION_FILE, "w") as f:
-        json.dump(calib_raw, f, indent=4)
-    print(f"Calibration saved to {CALIBRATION_FILE}")
-
-    bus.calibration = {
-        name: MotorCalibration(**vals) for name, vals in calib_raw.items()
-    }
+load_or_run_calibration(bus)
 
 # Read head positions (calibrated)
 head_pos = bus.sync_read("Present_Position", ["head_motor_1", "head_motor_2"])
@@ -128,13 +67,14 @@ print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.
 
 ik_solve = IK_SO101()
 
-# Convert Base_2 frame coordinates to the IK model's world frame (no manual rotation needed)
-target_world = ik_solve.base2_to_world(np.array([arm_frame_x, arm_frame_y, arm_frame_z]))
-print(f"IK target (world frame): [{target_world[0]:.4f}, {target_world[1]:.4f}, {target_world[2]:.4f}]")
+# camera_xyz_to_base_xyz returns coordinates in Base_2 frame (-Y is forward)
+# generate_ik accepts Base_2 frame coordinates directly
+target_base2 = [arm_frame_x, arm_frame_y, arm_frame_z]
+print(f"IK target (Base_2 frame): [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
 
 dt = 0.01
 
-trajectory_rad = ik_solve.generate_ik(target_world.tolist(), [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik(target_base2, [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
 
 

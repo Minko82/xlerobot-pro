@@ -1,146 +1,146 @@
-from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
+from lerobot.motors import Motor, MotorCalibration, MotorNormMode
 import numpy as np
+import json
+from pathlib import Path
 from ik_solver import IK_SO101
 import time
 
-# Connect to robot
-config = SO101FollowerConfig(port="/dev/ttyACM0", use_degrees=True)
-robot = SO101Follower(config)
-robot.connect()
+PORT = "/dev/ttyACM0"
+CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "single_bus.json"
+norm_mode_body = MotorNormMode.DEGREES
 
-# Limits and restrictions
-BUS_AB_MAX_ACCELERATION = 40
-BUS_AB_MAX_TORQUE = 800
-BUS_AB_MAX_VELOCITY = 100
+# Single bus: head (IDs 1-2) + right arm (IDs 7-12)
+bus = FeetechMotorsBus(
+    port=PORT,
+    motors={
+        "head_motor_1":  Motor(1,  "sts3215", norm_mode_body),
+        "head_motor_2":  Motor(2,  "sts3215", norm_mode_body),
+        "shoulder_pan":  Motor(7,  "sts3215", norm_mode_body),
+        "shoulder_lift": Motor(8,  "sts3215", norm_mode_body),
+        "elbow_flex":    Motor(9,  "sts3215", norm_mode_body),
+        "wrist_flex":    Motor(10, "sts3215", norm_mode_body),
+        "wrist_roll":    Motor(11, "sts3215", norm_mode_body),
+        "gripper":       Motor(12, "sts3215", MotorNormMode.RANGE_0_100),
+    },
+)
+bus.connect()
 
-# Disabling torque before writing to EPROM
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]:
-    robot.bus.disable_torque(motor_name)
+# Load calibration
+if not CALIBRATION_FILE.exists():
+    raise FileNotFoundError(
+        f"Calibration not found: {CALIBRATION_FILE}\n"
+        "Run calibration first."
+    )
+with open(CALIBRATION_FILE) as f:
+    calib_raw = json.load(f)
+bus.calibration = {
+    name: MotorCalibration(**vals) for name, vals in calib_raw.items()
+}
 
-# Maximum_Acceleration 0-254 - EPROM (permanently written to motor, persistent)
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]:
-    robot.bus.write("Maximum_Acceleration", motor_name, BUS_AB_MAX_ACCELERATION)
-# Acceleration is non-persistent SRAM version
+arm_motors = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 
-# Max_Torque_Limit 0-1000 - EPROM (permanently written to motor, persistent)
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]:
-    robot.bus.write("Max_Torque_Limit", motor_name, BUS_AB_MAX_TORQUE)
-# Torque_Limit is non-persistent SRAM version
 
-# Maximum_Velocity_Limit 0-254 - EPROM (permanently written to motor, persistent)
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]:
-    robot.bus.write("Maximum_Velocity_Limit", motor_name, BUS_AB_MAX_VELOCITY)
-# Goal_Velocity is non-persistent SRAM version
+def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d: int):
+    print("Applying motor limits:")
+    print(f"    Torque_Limit = {torque} / 1000")
+    print(f"    Acceleration = {acceleration} / 254")
+    print(f"    P={p}, I={i}, D={d}\n")
 
-# Verify EPROM values were set correctly
-print("\n" + "=" * 60)
-print("VERIFYING EPROM VALUES")
-print("=" * 60)
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]:
-    max_accel = robot.bus.read("Maximum_Acceleration", motor_name, normalize=False)
-    max_vel = robot.bus.read("Maximum_Velocity_Limit", motor_name, normalize=False)
-    max_torque = robot.bus.read("Max_Torque_Limit", motor_name, normalize=False)
+    bus.disable_torque(motors)
+    for name in motors:
+        bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
+        bus.write("Torque_Limit", name, torque)
+        bus.write("Acceleration", name, acceleration)
+        bus.write("P_Coefficient", name, p)
+        bus.write("I_Coefficient", name, i)
+        bus.write("D_Coefficient", name, d)
+    bus.enable_torque(motors)
 
-    print(f"\n{motor_name}:")
-    print(f"  Maximum_Acceleration:   {max_accel:>3} (expected: {BUS_AB_MAX_ACCELERATION})")
-    print(f"  Maximum_Velocity_Limit: {max_vel:>3} (expected: {BUS_AB_MAX_VELOCITY})")
 
-    expected_torque = BUS_AB_MAX_TORQUE if motor_name != "gripper" else 500
-    print(f"  Max_Torque_Limit:       {max_torque:>4} (expected: {expected_torque})")
-
-    # Check for mismatches
-    if max_accel != BUS_AB_MAX_ACCELERATION:
-        print(f"WARNING: Maximum_Acceleration mismatch!")
-    if max_vel != BUS_AB_MAX_VELOCITY:
-        print(f"WARNING: Maximum_Velocity_Limit mismatch!")
-    if max_torque != expected_torque:
-        print(f"WARNING: Max_Torque_Limit mismatch!")
-
-print("\n" + "=" * 60)
-print("VERIFICATION COMPLETE - Re-enabling torque")
-print("=" * 60 + "\n")
-
-# Re-enable torque after EPROM writes
-for motor_name in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]:
-    robot.bus.enable_torque(motor_name)
+apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
 
 ik_solve = IK_SO101()
 
 dt = 0.01
-test_dt = 0.1
+
+
+def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
+    """Convert MJCF joint angles (degrees) to motor convention (degrees).
+
+    Joint order: Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R
+    """
+    out = q_deg.copy()
+    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    return out
+
 
 trajectory_rad = ik_solve.generate_ik([0.35, 0.0, 0.0], [-0.05, -0.01, -0.0808])
-# default position tolerance of 1e-3. timesteps at 500
-# Move individual joints (degrees)
 RAD2DEG = 180.0 / np.pi
 traj_rad_stack = np.stack(trajectory_rad)
-trajectory = traj_rad_stack * RAD2DEG
+trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
 
 ARM_JOINT_KEYS = [
-    "shoulder_pan.pos",
-    "shoulder_lift.pos",
-    "elbow_flex.pos",
-    "wrist_flex.pos",
-    "wrist_roll.pos",
-    "gripper.pos",
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
 ]
 
 for step in trajectory:
     print(step)
 
 
-def traj_to_action(q_deg: np.ndarray) -> dict:
-    # Convert list of values to dict for lerobot usage
+def traj_to_goal(q_deg: np.ndarray) -> dict:
     assert q_deg.shape[0] == len(ARM_JOINT_KEYS)
-
     return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
 
 
-actions = [traj_to_action(q_deg) for q_deg in trajectory]
+goals = [traj_to_goal(q_deg) for q_deg in trajectory]
 
-for action in actions:
-    action["gripper.pos"] = 100.0
-    robot.send_action(action)
+for goal in goals:
+    goal["gripper"] = 100.0
+    bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-
-hold_action = {k: v for k, v in actions[-1].items() if k != "gripper.pos"}
+# Close gripper
+hold_goal = {k: v for k, v in goals[-1].items() if k != "gripper"}
 for grip in range(100, 5, -5):
-    action = dict(hold_action)
-    action["gripper.pos"] = float(grip)
-    robot.send_action(action)
+    goal = dict(hold_goal)
+    goal["gripper"] = float(grip)
+    bus.sync_write("Goal_Position", goal)
     time.sleep(0.05)
 
+# Movement: lift up
 trajectory_rad = ik_solve.generate_ik([0.30, 0.0, 0.10], [-0.05, -0.01, -0.0808])
 traj_rad_stack = np.stack(trajectory_rad)
-trajectory = traj_rad_stack * RAD2DEG
+trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
 
+goals = [traj_to_goal(q_deg) for q_deg in trajectory]
 
-actions = [traj_to_action(q_deg) for q_deg in trajectory]
-
-for action in actions:
-    robot.send_action(action)
+for goal in goals:
+    bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-
-# Movement 2
+# Movement 2: move to drop position
 trajectory_rad = ik_solve.generate_ik([0.10, 0.0, 0.0], [-0.05, -0.01, -0.0808])
 traj_rad_stack = np.stack(trajectory_rad)
-trajectory = traj_rad_stack * RAD2DEG
+trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
 
+goals = [traj_to_goal(q_deg) for q_deg in trajectory]
 
-actions = [traj_to_action(q_deg) for q_deg in trajectory]
-
-for action in actions:
-    robot.send_action(action)
+for goal in goals:
+    bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-hold_action = {k: v for k, v in actions[-1].items() if k != "gripper.pos"}
-
+# Open gripper to release
+hold_goal = {k: v for k, v in goals[-1].items() if k != "gripper"}
 for grip in range(5, 100, 5):
-    action = dict(hold_action)
-    action["gripper.pos"] = float(grip)
-    robot.send_action(action)
+    goal = dict(hold_goal)
+    goal["gripper"] = float(grip)
+    bus.sync_write("Goal_Position", goal)
     time.sleep(0.05)
 
-robot.disconnect()
+bus.disconnect()

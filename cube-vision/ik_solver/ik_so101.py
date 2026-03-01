@@ -59,17 +59,25 @@ class IK_SO101:
         self.tasks = [self.ee_task, self.posture_task]
 
     def base2_to_world(self, p_base2: np.ndarray) -> np.ndarray:
-        """Convert a point from Base_2 frame to the reduced model's world frame."""
+        """Convert a point from Base_2 frame to the pinocchio world frame.
+
+        Base_2 frame convention (from MJCF):
+            -Y is forward (arm reach direction)
+            +X is left
+            +Z is up
+        Base_2 is rotated 180° around Z from the world frame.
+        """
         return self._base2_R @ np.asarray(p_base2) + self._base2_t
 
     def generate_ik(
         self,
-        target_xyz: list[float],  # [x, y, z] in reduced model world frame
-        gripper_offset_xyz: list[float],  # [x, y, z]
+        target_xyz: list[float],  # [x, y, z] in Base_2 frame
+        gripper_offset_xyz: list[float],  # [x, y, z] in Base_2 frame
         position_tolerance: float = 1e-3,
         max_timesteps: int = 500,
     ):
-        xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
+        base2_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
+        xyz = self.base2_to_world(base2_xyz)
         target_transform = pin.SE3(np.eye(3), xyz)
         self.ee_task.set_target(target_transform)
         self.posture_task.set_target(self.configuration.q)
@@ -142,18 +150,17 @@ class IK_SO101:
 if __name__ == "__main__":
     arm = IK_SO101()
 
-    # Target in Base_2 frame, then convert to world
+    # Target in Base_2 frame: -Y is forward, +X is left, +Z is up
     target_base2 = [0.0, -0.30, 0.01]
-    target_world = arm.base2_to_world(target_base2).tolist()
 
     print(f"Target in Base_2 frame: {target_base2}")
-    print(f"Target in world frame:  {target_world}")
     print(f"Generating IK trajectory...")
 
-    traj = arm.generate_ik(target_xyz=target_world, gripper_offset_xyz=[0, 0, 0])
+    traj = arm.generate_ik(target_xyz=target_base2, gripper_offset_xyz=[0, 0, 0])
 
     if len(traj) > 0:
         print(f"Success! Trajectory has {len(traj)} steps.")
+        target_world = arm.base2_to_world(target_base2).tolist()
         arm.visualize_ik(traj, object_xyz=target_world)
     else:
         print("IK Failed or target out of reach.")
