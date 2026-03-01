@@ -78,22 +78,22 @@ def _revolute(
 # Forward kinematics (hardcoded from xlerobot_front.urdf)
 # ---------------------------------------------------------------------------
 
-# Arm chain: base_link -> Base_2 -> ... -> Fixed_Jaw_tip_2
+# Arm chain: base_link -> Base -> ... -> Fixed_Jaw_tip
 # Each revolute entry: (origin_xyz, origin_rpy, axis)
 _ARM_CHAIN = [
-    # arm_base_joint_2 (FIXED)
-    ((0.065, 0.133, 0.760), (0.0, 0.0, 1.5708), None),
-    # Rotation_2
+    # arm_base_joint (FIXED)
+    ((0.065, -0.133, 0.760), (0.0, 0.0, 1.5708), None),
+    # Rotation
     ((0.0, -0.0452, 0.0165), (1.5708, 0.0, 0.0), np.array([0.0, -1.0, 0.0])),
-    # Pitch_2
+    # Pitch
     ((0.0, 0.1025, 0.0306), (1.5708, 0.0, 0.0), np.array([-1.0, 0.0, 0.0])),
-    # Elbow_2
+    # Elbow
     ((0.0, 0.11257, 0.028), (-1.5708, 0.0, 0.0), np.array([1.0, 0.0, 0.0])),
-    # Wrist_Pitch_2
+    # Wrist_Pitch
     ((0.0, 0.0052, 0.1349), (-1.5708, 0.0, 0.0), np.array([1.0, 0.0, 0.0])),
-    # Wrist_Roll_2
+    # Wrist_Roll
     ((0.0, -0.0601, 0.0), (0.0, 1.5708, 0.0), np.array([0.0, -1.0, 0.0])),
-    # Fixed_Jaw_tip_joint_2 (FIXED)
+    # Fixed_Jaw_tip_joint (FIXED)
     ((0.01, -0.097, 0.0), (0.0, 0.0, 0.0), None),
 ]
 
@@ -142,9 +142,9 @@ def head_fk(q_urdf_rad: np.ndarray) -> np.ndarray:
 
 
 def ee_in_base(q_urdf_rad: np.ndarray) -> np.ndarray:
-    """EE position in Base_2 frame."""
+    """EE position in Base frame."""
     T = arm_fk(q_urdf_rad)
-    # arm_fk already starts from base_link through arm_base_joint_2 (Base_2),
+    # arm_fk already starts from base_link through arm_base_joint (Base),
     # so T is T_baselink_ee. T_baselink_base is the first fixed joint.
     T_base = _tf(*_ARM_CHAIN[0][:2])
     T_base_ee = np.linalg.inv(T_base) @ T
@@ -152,7 +152,7 @@ def ee_in_base(q_urdf_rad: np.ndarray) -> np.ndarray:
 
 
 def t_base_camera(q_arm_urdf_rad: np.ndarray, q_head_urdf_rad: np.ndarray) -> np.ndarray:
-    """4x4 transform from Base_2 to camera optical frame."""
+    """4x4 transform from Base to camera optical frame."""
     T_base = arm_fk(np.zeros(5))  # only the fixed joint matters; arm angles irrelevant
     # Actually we just need T_baselink_base which is the first fixed transform.
     T_baselink_base = _tf(*_ARM_CHAIN[0][:2])

@@ -14,7 +14,7 @@ for xyz, rpy, axis in chain:
     T = T @ T_local
 
 xlerobot_tip = T[:3, 3]
-print("=== xlerobot_front.urdf: arm tip in Base_2 frame at neutral ===")
+print("=== xlerobot_front.urdf: arm tip in Base frame at neutral ===")
 print(f"  Position: x={xlerobot_tip[0]:.4f}, y={xlerobot_tip[1]:.4f}, z={xlerobot_tip[2]:.4f}")
 print(f"  Rotation:\n{T[:3,:3]}")
 
@@ -49,10 +49,10 @@ print("\n=== Camera transform test (head at 0,0) ===")
 joint_values = {"head_pan_joint": 0.0, "head_tilt_joint": 0.0}
 # Test point: camera optical frame (0, 0, 0.5) = 50cm directly ahead
 bx, by, bz = frame_transform.camera_xyz_to_base_xyz(0.0, 0.0, 0.5, joint_values)
-print(f"  Camera (0, 0, 0.5) -> Base_2 ({bx:.4f}, {by:.4f}, {bz:.4f})")
+print(f"  Camera (0, 0, 0.5) -> Base ({bx:.4f}, {by:.4f}, {bz:.4f})")
 
 bx2, by2, bz2 = frame_transform.camera_xyz_to_base_xyz(0.0, 0.05, 0.5, joint_values)
-print(f"  Camera (0, 0.05, 0.5) -> Base_2 ({bx2:.4f}, {by2:.4f}, {bz2:.4f})")
+print(f"  Camera (0, 0.05, 0.5) -> Base ({bx2:.4f}, {by2:.4f}, {bz2:.4f})")
 
 print("\n=== Proposed Rz(90) correction ===")
 print(f"  Camera (0, 0, 0.5) -> SO101 IK frame ({-by:.4f}, {bx:.4f}, {bz:.4f})")

@@ -68,11 +68,11 @@ dt = 0.01
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
     """Convert MJCF joint angles (degrees) to motor convention (degrees).
 
-    Joint order: Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
     """
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
     return out
 
 

@@ -103,12 +103,12 @@ joint_values = {
 arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
     centroid[0], centroid[1], centroid[2], joint_values,
 )
-print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
 
 ik_solve = IK_SO101()
 
-# Convert Base_2 frame coordinates to the IK model's world frame (no manual rotation needed)
-target_world = ik_solve.base2_to_world(np.array([arm_frame_x, arm_frame_y, arm_frame_z]))
+# Convert Base frame coordinates to the IK model's world frame (no manual rotation needed)
+target_world = ik_solve.base_to_world(np.array([arm_frame_x, arm_frame_y, arm_frame_z]))
 print(f"IK target (world frame): [{target_world[0]:.4f}, {target_world[1]:.4f}, {target_world[2]:.4f}]")
 
 dt = 0.01
@@ -120,11 +120,11 @@ trajectory_rad = ik_solve.generate_ik(target_world.tolist(), [0, 0, 0])
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
     """Convert MJCF joint angles (degrees) to motor convention (degrees).
 
-    Joint order: Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
     """
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
     return out
 
 

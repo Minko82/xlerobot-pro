@@ -6,11 +6,12 @@ from color_detect import detect_object
 from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
 from calibrate import MOTOR_DEFS, BUS_PORT, load_or_run_calibration
+from visualize_ik import save_ik_plot
 import time
 
 DEG2RAD = np.pi / 180.0
 
-# Hardcoded IK target offsets in Base_2 frame (meters).
+# Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
 IK_TARGET_OFFSET_X_M = 0.0
 IK_TARGET_OFFSET_Y_M = 0.0
@@ -69,13 +70,13 @@ joint_values = {
 arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
     centroid[0], centroid[1], centroid[2], joint_values,
 )
-print(f"Transformed to xlerobot Base_2 frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
 
 ik_solve = IK_SO101()
 
-# camera_xyz_to_base_xyz returns coordinates in Base_2 frame (-Y is forward)
-# generate_ik accepts Base_2 frame coordinates directly
-target_base2 = [
+# camera_xyz_to_base_xyz returns coordinates in Base frame (+Y is forward)
+# generate_ik accepts Base frame coordinates directly
+target_base = [
     arm_frame_x + IK_TARGET_OFFSET_X_M,
     arm_frame_y + IK_TARGET_OFFSET_Y_M,
     arm_frame_z + IK_TARGET_OFFSET_Z_M,
@@ -85,31 +86,38 @@ print(
     f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
 )
 print(
-    f"IK target (Base_2 frame, offset): "
-    f"[{target_base2[0]:.4f}, {target_base2[1]:.4f}, {target_base2[2]:.4f}]"
+    f"IK target (Base frame, offset): "
+    f"[{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]"
+)
+
+# Visualize the IK target in Base frame
+save_ik_plot(
+    base_pos=ik_solve._base2_t,
+    ik_target_base=np.array(target_base),
+    camera_centroid_cam=np.array(centroid),
 )
 
 dt = 0.01
 
-trajectory_rad = ik_solve.generate_ik(target_base2, [0, 0, 0])
-# default position tolerance of 1e-3. timesteps at 500
+trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
+if not trajectory_rad:
+    print("IK failed — aborting.")
+    bus.disconnect()
+    raise SystemExit(1)
 
 
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
     """Convert MJCF joint angles (degrees) to motor convention (degrees).
 
-    Joint order: Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
     """
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
     return out
 
 
 RAD2DEG = 180.0 / np.pi
-traj_rad_stack = np.stack(trajectory_rad)
-# Convert MJCF radians -> degrees -> motor convention
-trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
 
 ARM_JOINT_KEYS = [
     "shoulder_pan",
@@ -120,24 +128,22 @@ ARM_JOINT_KEYS = [
 ]
 
 
-def traj_to_goal(q_deg: np.ndarray) -> dict:
-    assert q_deg.shape[0] == len(ARM_JOINT_KEYS)
-    return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
+def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
+    """Convert a list of joint configs (radians) to motor goal dicts (degrees)."""
+    stack = np.stack(traj_rad)
+    traj_deg = np.array([mjcf_to_motor(q * RAD2DEG) for q in stack])
+    goals = []
+    for q_deg in traj_deg:
+        assert q_deg.shape[0] == len(ARM_JOINT_KEYS)
+        goals.append({joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)})
+    return goals
 
 
-goals = [traj_to_goal(q_deg) for q_deg in trajectory]
-
+# Move to 10cm above target (gripper open)
+goals = traj_to_goals(trajectory_rad)
 for goal in goals:
     goal["gripper"] = 100.0
     bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
-
-# Close gripper
-hold_goal = {k: v for k, v in goals[-1].items() if k != "gripper"}
-for grip in range(100, 5, -5):
-    goal = dict(hold_goal)
-    goal["gripper"] = float(grip)
-    bus.sync_write("Goal_Position", goal)
-    time.sleep(0.05)
 
 bus.disconnect()

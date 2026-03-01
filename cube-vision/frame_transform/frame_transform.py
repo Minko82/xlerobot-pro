@@ -47,10 +47,10 @@ _R_LINK_TO_OPTICAL = np.array([
     [0, -1, 0],
 ])
 
-# Empirical correction between the MJCF camera chain and the arm Base_2 frame
-# used by IK in this project. Without this, camera-forward points map mostly to
-# Base_2 +X (sideways) instead of Base_2 -Y (forward).
-_R_BASE2_CORRECTION = np.array([
+# Empirical correction between the MJCF camera chain and the arm Base frame.
+# The Rz(-90°) correction is the same for both Base and Base_2 because the
+# 180° frame rotation and the 180° change in raw output cancel out.
+_R_BASE_CORRECTION = np.array([
     [0.0, 1.0, 0.0],   # x' = y
     [-1.0, 0.0, 0.0],  # y' = -x
     [0.0, 0.0, 1.0],   # z' = z
@@ -111,7 +111,7 @@ def camera_xyz_to_base_xyz(
     z: float,
     joint_values: Dict[str, float],
 ) -> Tuple[float, float, float]:
-    """Transform (x, y, z) from camera optical frame into the arm Base_2 frame.
+    """Transform (x, y, z) from camera optical frame into the arm Base frame.
 
     joint_values must include:
       - "head_pan_joint":  head pan in radians  (motor convention, sign is flipped internally)
@@ -139,7 +139,7 @@ def camera_xyz_to_base_xyz(
     # Build optical frame pose: same position as camera_link, rotated to optical convention
     R_cam_optical = oMcam_link.rotation @ _R_LINK_TO_OPTICAL
 
-    # T_base_camera: transform points from camera optical frame to Base_2 frame
+    # T_base_camera: transform points from camera optical frame to Base frame
     R = oMbase.rotation.T @ R_cam_optical
     t = oMbase.rotation.T @ (oMcam_link.translation - oMbase.translation)
 
@@ -149,6 +149,6 @@ def camera_xyz_to_base_xyz(
 
     p_cam = np.array([x, y, z, 1.0], dtype=float)
     p_base = (T @ p_cam)[:3]
-    p_base = _R_BASE2_CORRECTION @ p_base
+    p_base = _R_BASE_CORRECTION @ p_base
 
     return float(p_base[0]), float(p_base[1]), float(p_base[2])

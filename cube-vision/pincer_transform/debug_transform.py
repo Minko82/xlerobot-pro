@@ -20,7 +20,7 @@ def main():
 
     camera_centroid = np.array([0.18457174, -0.25867821, 0.67791008])  # optical frame
 
-    ee_base2 = np.array([0.11664671, -0.07417904, 0.47315754])  # from measure_ee.py
+    ee_base = np.array([0.11664671, -0.07417904, 0.47315754])  # from measure_ee.py
 
     # ── Build model ──
     model = pin.buildModelFromUrdf(str(URDF_PATH))
@@ -28,7 +28,7 @@ def main():
 
     q_full = pin.neutral(model)
 
-    # Set arm joints to zero (they don't affect Base_2 or camera placement)
+    # Set arm joints to zero (they don't affect Base or camera placement)
     q_arm = np.zeros(5)
     for name, q_deg in zip(ARM_JOINTS, arm_motor_to_urdf(q_arm)):
         jid = model.getJointId(name)
@@ -52,7 +52,7 @@ def main():
     # ── Dump key frames in world (root) frame ──
     frames_to_check = [
         "base_link",
-        "Base_2",
+        "Base",
         "top_base_link",
         "head_pan_link",
         "head_tilt_link",
@@ -74,13 +74,13 @@ def main():
     print(f"Camera X-axis (right)   in world: {oMcam.rotation[:, 0]}")
     print(f"Camera Y-axis (down)    in world: {oMcam.rotation[:, 1]}")
 
-    # ── Base_2 frame ──
+    # ── Base frame ──
     base_fid = model.getFrameId(BASE_FRAME)
     oMbase = data.oMf[base_fid]
-    print(f"\nBase_2 position (world): {oMbase.translation}")
-    print(f"Base_2 Z-axis (up) in world: {oMbase.rotation[:, 2]}")
-    print(f"Base_2 X-axis in world:      {oMbase.rotation[:, 0]}")
-    print(f"Base_2 Y-axis in world:      {oMbase.rotation[:, 1]}")
+    print(f"\nBase position (world): {oMbase.translation}")
+    print(f"Base Z-axis (up) in world: {oMbase.rotation[:, 2]}")
+    print(f"Base X-axis in world:      {oMbase.rotation[:, 0]}")
+    print(f"Base Y-axis in world:      {oMbase.rotation[:, 1]}")
 
     # ── Build T_base_camera ──
     R = oMbase.rotation.T @ oMcam.rotation
@@ -90,23 +90,23 @@ def main():
     T[:3, 3] = t
 
     print(f"\n=== T_base_camera ===")
-    print(f"Camera position in Base_2 frame: {t}")
-    print(f"Camera forward (Z) in Base_2 frame: {R[:, 2]}")
+    print(f"Camera position in Base frame: {t}")
+    print(f"Camera forward (Z) in Base frame: {R[:, 2]}")
 
     # ── Transform centroid ──
     p_h = np.array([*camera_centroid, 1.0])
-    p_base2 = (T @ p_h)[:3]
+    p_base = (T @ p_h)[:3]
     print(f"\n=== Results ===")
     print(f"Camera centroid (optical): {camera_centroid}")
-    print(f"Transformed to Base_2:     {p_base2}")
-    print(f"Expected (from EE):        {ee_base2}")
-    print(f"Error:                     {p_base2 - ee_base2}")
-    print(f"Error magnitude:           {np.linalg.norm(p_base2 - ee_base2):.4f} m")
+    print(f"Transformed to Base:     {p_base}")
+    print(f"Expected (from EE):        {ee_base}")
+    print(f"Error:                     {p_base - ee_base}")
+    print(f"Error magnitude:           {np.linalg.norm(p_base - ee_base):.4f} m")
 
     # ── Sanity: where does the camera think the point is in world? ──
     p_world = oMcam.rotation @ camera_centroid + oMcam.translation
     print(f"\nObject in world frame (from camera): {p_world}")
-    p_world_ee = oMbase.rotation @ ee_base2 + oMbase.translation
+    p_world_ee = oMbase.rotation @ ee_base + oMbase.translation
     print(f"EE in world frame (from measure_ee): {p_world_ee}")
     print(f"World frame error:                   {p_world - p_world_ee}")
 

@@ -62,9 +62,9 @@ head_pan_deg = float(head_pos2["head_motor_1"])
 head_tilt_deg = float(head_pos2["head_motor_2"])
 print(f"Head (re-read): pan={head_pan_deg:.2f}°, tilt={head_tilt_deg:.2f}°")
 
-# ── Arm FK: compute EE position in Base_2 frame ────────────────────────
+# ── Arm FK: compute EE position in Base frame ──────────────────────────
 MJCF_PATH = Path(__file__).resolve().parent / "assets" / "xlerobot.xml"
-ARM_JOINTS = {"Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"}
+ARM_JOINTS = {"Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"}
 
 full_model = pin.buildModelFromMJCF(str(MJCF_PATH))
 q_neutral = pin.neutral(full_model)
@@ -80,8 +80,8 @@ arm_data = arm_model.createData()
 # Convert motor degrees -> MJCF degrees -> radians
 def motor_to_mjcf(q_deg):
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # shoulder_lift -> Pitch_R
-    out[2] = out[2] + 90.0   # elbow_flex -> Elbow_R
+    out[1] = 90.0 - out[1]   # shoulder_lift -> Pitch_L
+    out[2] = out[2] + 90.0   # elbow_flex -> Elbow_L
     return out
 
 mjcf_deg = motor_to_mjcf(arm_motor_deg)
@@ -91,7 +91,7 @@ print(f"Arm (MJCF rad):  {mjcf_rad}")
 
 # Set joint configuration
 q = pin.neutral(arm_model)
-arm_joint_names = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"]
+arm_joint_names = ["Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"]
 for i, jname in enumerate(arm_joint_names):
     jid = arm_model.getJointId(jname)
     q[arm_model.joints[jid].idx_q] = mjcf_rad[i]
@@ -99,22 +99,22 @@ for i, jname in enumerate(arm_joint_names):
 pin.forwardKinematics(arm_model, arm_data, q)
 pin.updateFramePlacements(arm_model, arm_data)
 
-# Get EE and Base_2 in world frame
-ee_frame_id = arm_model.getFrameId("Fixed_Jaw_2")
-base2_frame_id = arm_model.getFrameId("Base_2")
+# Get EE and Base in world frame
+ee_frame_id = arm_model.getFrameId("Fixed_Jaw")
+base_frame_id = arm_model.getFrameId("Base")
 
 oMee = arm_data.oMf[ee_frame_id]
-oMbase2 = arm_data.oMf[base2_frame_id]
+oMbase = arm_data.oMf[base_frame_id]
 
-# EE in Base_2 frame
-ee_in_base2 = oMbase2.rotation.T @ (oMee.translation - oMbase2.translation)
+# EE in Base frame
+ee_in_base = oMbase.rotation.T @ (oMee.translation - oMbase.translation)
 
-print(f"\n=== ARM FK (End-Effector in Base_2 frame) ===")
+print(f"\n=== ARM FK (End-Effector in Base frame) ===")
 print(f"  EE world:  [{oMee.translation[0]:.4f}, {oMee.translation[1]:.4f}, {oMee.translation[2]:.4f}]")
-print(f"  Base_2 world: [{oMbase2.translation[0]:.4f}, {oMbase2.translation[1]:.4f}, {oMbase2.translation[2]:.4f}]")
-print(f"  EE in Base_2: [{ee_in_base2[0]:.4f}, {ee_in_base2[1]:.4f}, {ee_in_base2[2]:.4f}]")
+print(f"  Base world: [{oMbase.translation[0]:.4f}, {oMbase.translation[1]:.4f}, {oMbase.translation[2]:.4f}]")
+print(f"  EE in Base: [{ee_in_base[0]:.4f}, {ee_in_base[1]:.4f}, {ee_in_base[2]:.4f}]")
 
-# ── Vision: detect cube and transform to Base_2 ────────────────────────
+# ── Vision: detect cube and transform to Base ──────────────────────────
 print("\n=== Capturing from RealSense... ===")
 capture()
 
@@ -136,8 +136,8 @@ try:
     vx, vy, vz = camera_xyz_to_base_xyz(
         centroid_cam[0], centroid_cam[1], centroid_cam[2], joint_values,
     )
-    print(f"\n=== VISION (Cube in Base_2 frame) ===")
-    print(f"  Vision Base_2: [{vx:.4f}, {vy:.4f}, {vz:.4f}]")
+    print(f"\n=== VISION (Cube in Base frame) ===")
+    print(f"  Vision Base: [{vx:.4f}, {vy:.4f}, {vz:.4f}]")
 except Exception as e:
     print(f"  Vision detection failed: {e}")
     vx, vy, vz = None, None, None
@@ -146,16 +146,16 @@ except Exception as e:
 print("\n" + "=" * 60)
 print("COMPARISON")
 print("=" * 60)
-print(f"  FK  (EE in Base_2): [{ee_in_base2[0]:.4f}, {ee_in_base2[1]:.4f}, {ee_in_base2[2]:.4f}]")
+print(f"  FK  (EE in Base): [{ee_in_base[0]:.4f}, {ee_in_base[1]:.4f}, {ee_in_base[2]:.4f}]")
 if vx is not None:
-    print(f"  VIS (cube Base_2):  [{vx:.4f}, {vy:.4f}, {vz:.4f}]")
-    err = np.array([vx - ee_in_base2[0], vy - ee_in_base2[1], vz - ee_in_base2[2]])
+    print(f"  VIS (cube Base):  [{vx:.4f}, {vy:.4f}, {vz:.4f}]")
+    err = np.array([vx - ee_in_base[0], vy - ee_in_base[1], vz - ee_in_base[2]])
     print(f"  Error (VIS - FK):   [{err[0]:.4f}, {err[1]:.4f}, {err[2]:.4f}]")
     print(f"  Error magnitude:    {np.linalg.norm(err)*100:.1f} cm")
     print(f"\n  Breakdown:")
-    print(f"    X error: {err[0]*100:+.1f} cm  (Base_2 left/right)")
-    print(f"    Y error: {err[1]*100:+.1f} cm  (Base_2 forward/back)")
-    print(f"    Z error: {err[2]*100:+.1f} cm  (Base_2 up/down)")
+    print(f"    X error: {err[0]*100:+.1f} cm  (Base left/right)")
+    print(f"    Y error: {err[1]*100:+.1f} cm  (Base forward/back)")
+    print(f"    Z error: {err[2]*100:+.1f} cm  (Base up/down)")
 else:
     print(f"  VIS: failed — no comparison possible")
 

@@ -2,7 +2,7 @@
 
 Since the URDF head geometry is inaccurate, this bypasses the head kinematic
 chain and solves for the 4x4 rigid transform from camera optical frame to
-Base_2 frame using paired (EE position, camera centroid) measurements.
+Base frame using paired (EE position, camera centroid) measurements.
 
 Procedure
 ---------
@@ -191,7 +191,7 @@ def main():
         q_arm = read_motors(bus, ARM_MOTORS)
         p_ee = ee_in_base(q_arm, model_arm, data_arm, base_fid, ee_fid)
         print(f"  Arm motor (deg): {q_arm}")
-        print(f"  EE (Base_2, m):  {p_ee}")
+        print(f"  EE (Base, m):  {p_ee}")
 
         input("  Now move the arm out of the way. Press ENTER to capture...")
 
@@ -240,7 +240,7 @@ def main():
         errors.append(err)
         print(f"\n  Sample {i+1}:")
         print(f"    Camera centroid: {pts_camera[i]}")
-        print(f"    Projected Base_2: {p_proj}")
+        print(f"    Projected Base: {p_proj}")
         print(f"    EE ground truth:  {pts_base[i]}")
         print(f"    Error: {err:.4f} m")
 

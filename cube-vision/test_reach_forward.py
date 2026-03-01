@@ -54,11 +54,11 @@ apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
 ik_solve = IK_SO101()
 
 # Target: 35cm forward from the robot base
-# Base_2 frame: -Y is forward, +X is left, +Z is up
-target_base2 = [0.0, -0.35, 0.0]
-print(f"IK target (Base_2 frame): {target_base2}")
+# Base frame: +Y is forward, -X is left, +Z is up
+target_base = [0.0, 0.35, 0.0]
+print(f"IK target (Base frame): {target_base}")
 
-trajectory_rad = ik_solve.generate_ik(target_base2, [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
 print(f"IK trajectory: {len(trajectory_rad)} steps")
 
 RAD2DEG = 180.0 / np.pi
@@ -66,8 +66,8 @@ RAD2DEG = 180.0 / np.pi
 
 def mjcf_to_motor(q_deg):
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # Pitch_R -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_R -> elbow_flex
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
     return out
 
 
