@@ -10,6 +10,12 @@ import time
 
 DEG2RAD = np.pi / 180.0
 
+# Hardcoded IK target offsets in Base_2 frame (meters).
+# Tune these to compensate end-effector placement error without changing vision transforms.
+IK_TARGET_OFFSET_X_M = 0.0
+IK_TARGET_OFFSET_Y_M = 0.0
+IK_TARGET_OFFSET_Z_M = 0.0
+
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
 bus.connect()
@@ -69,8 +75,19 @@ ik_solve = IK_SO101()
 
 # camera_xyz_to_base_xyz returns coordinates in Base_2 frame (-Y is forward)
 # generate_ik accepts Base_2 frame coordinates directly
-target_base2 = [arm_frame_x, arm_frame_y, arm_frame_z]
-print(f"IK target (Base_2 frame): [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+target_base2 = [
+    arm_frame_x + IK_TARGET_OFFSET_X_M,
+    arm_frame_y + IK_TARGET_OFFSET_Y_M,
+    arm_frame_z + IK_TARGET_OFFSET_Z_M,
+]
+print(
+    "IK target offsets (m): "
+    f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
+)
+print(
+    f"IK target (Base_2 frame, offset): "
+    f"[{target_base2[0]:.4f}, {target_base2[1]:.4f}, {target_base2[2]:.4f}]"
+)
 
 dt = 0.01
 
