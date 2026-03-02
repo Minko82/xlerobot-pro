@@ -107,13 +107,20 @@ if not trajectory_rad:
 
 
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
-    """Convert MJCF joint angles (degrees) to motor convention (degrees).
+    """Convert MJCF/URDF joint angles (degrees) to motor convention (degrees).
 
-    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
+    Joint order: Rotation_2, Pitch_2, Elbow_2, Wrist_Pitch_2, Wrist_Roll_2
+
+    The right arm is a mirrored assembly — all motor directions are reversed
+    compared to the left arm convention.  Every output angle is negated
+    relative to the left-arm mapping.
     """
     out = q_deg.copy()
-    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
+    out[0] = -out[0]          # Rotation:    negated (mirrored)
+    out[1] = out[1] - 90.0    # Pitch_2  ->  shoulder_lift (negated flip+offset)
+    out[2] = 90.0 - out[2]    # Elbow_2  ->  elbow_flex    (negated offset)
+    out[3] = -out[3]          # Wrist_Pitch: negated (mirrored)
+    out[4] = -out[4]          # Wrist_Roll:  negated (mirrored)
     return out
 
 

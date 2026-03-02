@@ -320,17 +320,23 @@ def test_motor_mapping():
     section("6. Motor Mapping (URDF deg → motor deg)")
 
     def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
-        """Same mapping used in control_single_bus.py / control.py."""
+        """Same mapping used in control_single_bus.py (right arm, mirrored)."""
         out = q_deg.copy()
-        out[1] = 90.0 - out[1]   # Pitch -> shoulder_lift
-        out[2] = out[2] - 90.0   # Elbow -> elbow_flex
+        out[0] = -out[0]          # Rotation:    negated (mirrored)
+        out[1] = out[1] - 90.0    # Pitch  ->  shoulder_lift
+        out[2] = 90.0 - out[2]    # Elbow  ->  elbow_flex
+        out[3] = -out[3]          # Wrist_Pitch: negated
+        out[4] = -out[4]          # Wrist_Roll:  negated
         return out
 
     def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
         """Inverse of mjcf_to_motor."""
         out = q_deg.copy()
-        out[1] = 90.0 - out[1]   # shoulder_lift -> Pitch
-        out[2] = out[2] + 90.0   # elbow_flex -> Elbow
+        out[0] = -out[0]
+        out[1] = out[1] + 90.0    # shoulder_lift -> Pitch
+        out[2] = 90.0 - out[2]    # elbow_flex -> Elbow
+        out[3] = -out[3]
+        out[4] = -out[4]
         return out
 
     # Round-trip test
@@ -345,15 +351,15 @@ def test_motor_mapping():
     # If URDF pitch = 0°, motor shoulder_lift should = 90°
     zero_urdf = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
     zero_motor = mjcf_to_motor(zero_urdf)
-    check("URDF all-zero: motor shoulder_lift=90°",
-          abs(zero_motor[1] - 90.0) < 0.01, f"got {zero_motor[1]:.2f}°")
-    check("URDF all-zero: motor elbow_flex=-90°",
-          abs(zero_motor[2] - (-90.0)) < 0.01, f"got {zero_motor[2]:.2f}°")
+    check("URDF all-zero: motor shoulder_lift=-90°",
+          abs(zero_motor[1] - (-90.0)) < 0.01, f"got {zero_motor[1]:.2f}°")
+    check("URDF all-zero: motor elbow_flex=90°",
+          abs(zero_motor[2] - 90.0) < 0.01, f"got {zero_motor[2]:.2f}°")
 
-    # Rotation and wrist joints pass through unchanged
-    check("Rotation passes through", abs(zero_motor[0]) < 0.01)
-    check("Wrist_Pitch passes through", abs(zero_motor[3]) < 0.01)
-    check("Wrist_Roll passes through", abs(zero_motor[4]) < 0.01)
+    # Rotation and wrist joints are negated (mirrored right arm)
+    check("Rotation negated", abs(zero_motor[0]) < 0.01)
+    check("Wrist_Pitch negated", abs(zero_motor[3]) < 0.01)
+    check("Wrist_Roll negated", abs(zero_motor[4]) < 0.01)
 
     # Verify motor angles are in a sane range for typical IK outputs
     from ik_solver import IK_SO101
@@ -392,12 +398,13 @@ def test_full_pipeline_roundtrip():
 
     joint_values = {
         "head_pan_joint":  1.0 * DEG2RAD,   # neutral
-        "head_tilt_joint": 14.0 * DEG2RAD,  # neutral
+        "head_tilt_joint": 45.0 * DEG2RAD,  # tilted down to see the table
     }
 
-    # Synthetic camera point: object 20cm ahead, slightly right and below
-    # (must transform to a Base_2 target within the arm's ~0.39m reach)
-    cam_point = np.array([0.02, 0.05, 0.20])
+    # Synthetic camera point: object ~33cm ahead and ~32cm below in optical frame.
+    # With the head tilted 45° down, this maps to Base_2 ≈ [0, -0.20, 0.05]
+    # which is well within the arm's ~0.39 m reach.
+    cam_point = np.array([0.333, 0.3233, 0.1397])
 
     # Step B: Transform to Base_2
     bx, by, bz = camera_xyz_to_base_xyz(cam_point[0], cam_point[1], cam_point[2], joint_values)
@@ -435,14 +442,20 @@ def test_full_pipeline_roundtrip():
         # Step E: Motor mapping round-trip
         def mjcf_to_motor(q_deg):
             out = q_deg.copy()
-            out[1] = 90.0 - out[1]
-            out[2] = out[2] - 90.0
+            out[0] = -out[0]
+            out[1] = out[1] - 90.0
+            out[2] = 90.0 - out[2]
+            out[3] = -out[3]
+            out[4] = -out[4]
             return out
 
         def motor_to_mjcf(q_deg):
             out = q_deg.copy()
-            out[1] = 90.0 - out[1]
-            out[2] = out[2] + 90.0
+            out[0] = -out[0]
+            out[1] = out[1] + 90.0
+            out[2] = 90.0 - out[2]
+            out[3] = -out[3]
+            out[4] = -out[4]
             return out
 
         final_deg = final_q * RAD2DEG
