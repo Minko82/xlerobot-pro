@@ -99,11 +99,18 @@ save_ik_plot(
 
 dt = 0.01
 
+print("Running IK solver...")
 trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
 if not trajectory_rad:
-    print("IK failed — aborting.")
+    print("IK failed — no trajectory returned. Target may be out of reach.")
+    print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
+    print(f"  Base world pos: {ik_solve._base_t}")
     bus.disconnect()
     raise SystemExit(1)
+
+print(f"IK succeeded: {len(trajectory_rad)} steps")
+print(f"  Final joint config (rad): {trajectory_rad[-1]}")
+print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
 
 
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
@@ -141,9 +148,25 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
 
 # Move to 10cm above target (gripper open)
 goals = traj_to_goals(trajectory_rad)
-for goal in goals:
+print(f"Sending {len(goals)} waypoints to motors...")
+print(f"  First goal: {goals[0]}")
+print(f"  Last goal:  {goals[-1]}")
+for i, goal in enumerate(goals):
     goal["gripper"] = 100.0
     bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
+# Re-send final goal and hold so motors have time to physically reach it
+final_goal = goals[-1].copy()
+final_goal["gripper"] = 100.0
+bus.sync_write("Goal_Position", final_goal)
+print("Trajectory sent. Holding final position for 5 seconds...")
+time.sleep(5.0)
+
+# Read back actual positions to verify movement
+actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
+print("Actual motor positions (deg):")
+for name in ARM_JOINT_KEYS:
+    print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
+print("Done.")
 bus.disconnect()

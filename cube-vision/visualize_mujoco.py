@@ -17,7 +17,9 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -65,6 +67,37 @@ _IK_JOINT_NAMES = [
     "Wrist_Pitch_L",
     "Wrist_Roll_L",
 ]
+
+def _load_mj_model_with_mesh_fallback() -> "mujoco.MjModel":
+    """Load MJCF, falling back to repo-local assets/stl if meshdir is broken."""
+    try:
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(_MJCF_PATH.parent)
+            return mujoco.MjModel.from_xml_path(str(_MJCF_PATH))
+        finally:
+            os.chdir(prev_cwd)
+    except ValueError as exc:
+        assets_dir = _PROJECT_ROOT / "assets" / "stl"
+        if not assets_dir.is_dir():
+            raise
+        print(f"MJCF load failed: {exc}")
+        print(f"Retrying with meshdir={assets_dir}")
+
+        tree = ET.parse(_MJCF_PATH)
+        root = tree.getroot()
+        compiler = root.find("compiler")
+        if compiler is None:
+            compiler = ET.SubElement(root, "compiler")
+        compiler.set("meshdir", str(assets_dir))
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".xml", delete=False) as tmp:
+            tree.write(tmp, encoding="utf-8")
+            tmp_xml_path = Path(tmp.name)
+        try:
+            return mujoco.MjModel.from_xml_path(str(tmp_xml_path))
+        finally:
+            tmp_xml_path.unlink(missing_ok=True)
 
 
 def _resolve_joint_qpos_indices(model: "mujoco.MjModel") -> list[int]:
@@ -144,11 +177,7 @@ def run_visualization(
     # Load MuJoCo model
     # ------------------------------------------------------------------
     print(f"Loading MJCF model from {_MJCF_PATH} ...")
-    # Load from the XML's own directory so meshdir="./assets/" resolves correctly
-    prev_cwd = os.getcwd()
-    os.chdir(_MJCF_PATH.parent)
-    model = mujoco.MjModel.from_xml_path(str(_MJCF_PATH))
-    os.chdir(prev_cwd)
+    model = _load_mj_model_with_mesh_fallback()
     data = mujoco.MjData(model)
 
     qpos_indices = _resolve_joint_qpos_indices(model)
