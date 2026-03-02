@@ -107,13 +107,14 @@ print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f
 
 ik_solve = IK_SO101()
 
-# Convert Base frame coordinates to the IK model's world frame (no manual rotation needed)
-target_world = ik_solve.base_to_world(np.array([arm_frame_x, arm_frame_y, arm_frame_z]))
-print(f"IK target (world frame): [{target_world[0]:.4f}, {target_world[1]:.4f}, {target_world[2]:.4f}]")
+# camera_xyz_to_base_xyz returns coordinates in Base_2 frame.
+# generate_ik accepts Base_2 frame coordinates directly (it converts to world internally).
+target_base = [arm_frame_x, arm_frame_y, arm_frame_z]
+print(f"IK target (Base_2 frame): [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
 
 dt = 0.01
 
-trajectory_rad = ik_solve.generate_ik(target_world.tolist(), [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
 # default position tolerance of 1e-3. timesteps at 500
 
 

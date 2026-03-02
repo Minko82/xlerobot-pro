@@ -15,17 +15,17 @@ try:
 except ModuleNotFoundError:
     MeshcatVisualizer = None
 
-# Path to the MJCF model (shared with frame_transform)
-_MJCF_PATH = Path(__file__).resolve().parent.parent / "assets" / "xlerobot.xml"
+# Path to the URDF model (shared with frame_transform)
+_URDF_PATH = Path(__file__).resolve().parent.parent / "frame_transform" / "xlerobot" / "xlerobot.urdf"
 
 # Joints to keep in the reduced model (second arm only)
-_ARM_JOINTS = {"Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"}
+_ARM_JOINTS = {"Rotation_2", "Pitch_2", "Elbow_2", "Wrist_Pitch_2", "Wrist_Roll_2"}
 
 
 class IK_SO101:
     def __init__(self) -> None:
-        # Build reduced model from MJCF with only the second arm's 5 joints
-        full_model = pin.buildModelFromMJCF(str(_MJCF_PATH))
+        # Build reduced model from URDF with only the second arm's 5 joints
+        full_model = pin.buildModelFromUrdf(str(_URDF_PATH))
         q_neutral = pin.neutral(full_model)
 
         lock_ids = [
@@ -55,13 +55,13 @@ class IK_SO101:
 
         # Pink tasks
         self.ee_task = FrameTask(self.EE_FRAME, position_cost=10.0, orientation_cost=0.0)
-        self.posture_task = PostureTask(cost=1e-2)
+        self.posture_task = PostureTask(cost=1e-4)
         self.tasks = [self.ee_task, self.posture_task]
 
     def base2_to_world(self, p_base2: np.ndarray) -> np.ndarray:
         """Convert a point from Base_2 frame to the pinocchio world frame.
 
-        Base_2 frame convention (from MJCF):
+        Base_2 frame convention (from URDF):
             -Y is forward (arm reach direction)
             +X is left
             +Z is up
@@ -69,34 +69,38 @@ class IK_SO101:
         """
         return self._base2_R @ np.asarray(p_base2) + self._base2_t
 
-    def generate_ik(
+    # Seed configurations for multi-start IK (degrees, converted to rad at use).
+    # Neutral + "arm raised" seeds to escape local minima for high targets.
+    _SEED_CONFIGS_DEG = [
+        [0.0, 0.0, 0.0, 0.0, 0.0],         # neutral (arm extended forward)
+        [0.0, 90.0, 90.0, 0.0, 0.0],        # shoulder + elbow at 90°
+        [0.0, 135.0, 135.0, 45.0, 0.0],     # arm folded back / raised
+    ]
+
+    def _run_ik_from_seed(
         self,
-        target_xyz: list[float],  # [x, y, z] in Base_2 frame
-        gripper_offset_xyz: list[float],  # [x, y, z] in Base_2 frame
-        position_tolerance: float = 1e-3,
-        max_timesteps: int = 500,
-    ):
-        base2_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
-        xyz = self.base2_to_world(base2_xyz)
-        target_transform = pin.SE3(np.eye(3), xyz)
+        q_seed: np.ndarray,
+        target_transform: "pin.SE3",
+        position_tolerance: float,
+        max_timesteps: int,
+    ) -> tuple[list[np.ndarray], float]:
+        """Run IK from a given seed configuration. Returns (trajectory, final_error)."""
+        self.configuration = pink.Configuration(self.model, self.data, q_seed.copy())
         self.ee_task.set_target(target_transform)
-        self.posture_task.set_target(self.configuration.q)
+        self.posture_task.set_target(q_seed)
 
         trajectory: list[np.ndarray] = []
-
         ee_frame_id = self.model.getFrameId(self.EE_FRAME)
 
         for step in range(max_timesteps):
             pin.forwardKinematics(self.model, self.data, self.configuration.q)
             pin.updateFramePlacements(self.model, self.data)
 
-            transform_current = self.data.oMf[ee_frame_id]
-            pos_error = target_transform.translation - transform_current.translation
+            pos_error = target_transform.translation - self.data.oMf[ee_frame_id].translation
+            error_norm = np.linalg.norm(pos_error)
 
-            if np.linalg.norm(pos_error) < position_tolerance:
+            if error_norm < position_tolerance:
                 break
-
-            self.posture_task.set_target(self.configuration.q)
 
             try:
                 dq = solve_ik(self.configuration, self.tasks, self.dt, solver="quadprog")
@@ -104,14 +108,55 @@ class IK_SO101:
                 print(f"IK Solver Failed at Step{step}. Error: {e}")
                 break
 
-            dq_max = 1.0
-            dq = np.clip(dq, -dq_max, dq_max)
-            dq *= 0.2
-
             self.configuration.integrate_inplace(dq, self.dt)
             trajectory.append(self.configuration.q.copy())
 
-        return trajectory
+        # Compute final error
+        pin.forwardKinematics(self.model, self.data, self.configuration.q)
+        pin.updateFramePlacements(self.model, self.data)
+        final_error = np.linalg.norm(
+            target_transform.translation - self.data.oMf[ee_frame_id].translation
+        )
+        return trajectory, final_error
+
+    def generate_ik(
+        self,
+        target_xyz: list[float],  # [x, y, z] in Base_2 frame
+        gripper_offset_xyz: list[float],  # [x, y, z] in Base_2 frame
+        position_tolerance: float = 1e-3,
+        max_timesteps: int = 1000,
+    ):
+        base2_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
+        xyz = self.base2_to_world(base2_xyz)
+        target_transform = pin.SE3(np.eye(3), xyz)
+
+        best_traj: list[np.ndarray] = []
+        best_error = float("inf")
+
+        for seed_deg in self._SEED_CONFIGS_DEG:
+            q_seed = np.deg2rad(seed_deg)
+            # Clamp seed to joint limits
+            q_seed = np.clip(
+                q_seed,
+                self.model.lowerPositionLimit,
+                self.model.upperPositionLimit,
+            )
+            traj, error = self._run_ik_from_seed(
+                q_seed, target_transform, position_tolerance, max_timesteps,
+            )
+            if error < best_error:
+                best_error = error
+                best_traj = traj
+            # Early exit if we already converged
+            if best_error < position_tolerance:
+                break
+
+        # Update instance state to match the best result
+        if best_traj:
+            self.q = best_traj[-1].copy()
+            self.configuration = pink.Configuration(self.model, self.data, self.q)
+
+        return best_traj
 
     def visualize_ik(self, trajectory: list, object_xyz):
         if MeshcatVisualizer is None:

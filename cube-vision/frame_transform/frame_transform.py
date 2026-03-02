@@ -1,4 +1,4 @@
-"""Camera-to-arm-base frame transform using pinocchio FK with xlerobot.xml (MJCF).
+"""Camera-to-arm-base frame transform using pinocchio FK with xlerobot.urdf.
 
 The model is loaded once at import time and reused for every query.
 """
@@ -15,9 +15,9 @@ import pinocchio as pin
 # Model (loaded once)
 # ---------------------------------------------------------------------------
 
-_MJCF_PATH = Path(__file__).resolve().parent.parent / "assets" / "xlerobot.xml"
+_URDF_PATH = Path(__file__).resolve().parent / "xlerobot" / "xlerobot.urdf"
 
-_model = pin.buildModelFromMJCF(str(_MJCF_PATH))
+_model = pin.buildModelFromUrdf(str(_URDF_PATH))
 _data = _model.createData()
 
 # Frame IDs (resolved once)
