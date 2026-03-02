@@ -29,22 +29,16 @@ _BASE_FRAME_ID = _model.getFrameId("Base")
 _CAMERA_LINK_FRAME_ID = _model.getFrameId("head_camera_link")
 
 # Rotation from camera_link frame to optical frame.
-# camera_link axes at neutral: X = forward (-X world), Y = right (-Y world), Z = up (+Z world)
+# camera_link axes at neutral: X = forward (-X world), Y = left (-Y world), Z = up (+Z world)
 # Optical convention: Z = forward, X = right, Y = down
-# So: optical_Z = link_X, optical_X = link_Y, optical_Y = -link_Z
-_R_LINK_TO_OPTICAL = np.array([
-    [0,  0, 1],   # optical X (right) = link Y ... column 0 = link coords of optical X
-    [1,  0, 0],   # wait, let me be precise
-    [0, -1, 0],
-])
 # Columns of R_link_to_optical are the optical axes expressed in link frame:
-#   col 0 (optical X = right):   link Y  = [0, 1, 0]
-#   col 1 (optical Y = down):   -link Z  = [0, 0, -1]
-#   col 2 (optical Z = forward): link X  = [1, 0, 0]
+#   col 0 (optical X = right):  -link Y  = [0, -1, 0]   (right = +Y world = -link Y)
+#   col 1 (optical Y = down):   -link Z  = [0,  0, -1]
+#   col 2 (optical Z = forward): link X  = [1,  0,  0]
 _R_LINK_TO_OPTICAL = np.array([
-    [0,  0, 1],
+    [ 0,  0, 1],
     [1,  0, 0],
-    [0, -1, 0],
+    [ 0, -1, 0],
 ])
 
 # No base correction needed: pinocchio FK computes the exact rigid transform
@@ -74,7 +68,7 @@ def _head_motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
         pan motor reads ~1°, tilt motor reads ~14° at MJCF zero.
     """
     out = q_deg.copy()
-    out[0] = -(out[0] - 1.0)
+    out[0] = out[0] - 1.0
     out[1] = out[1] - 14.0
     return out
 

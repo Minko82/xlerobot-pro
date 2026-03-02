@@ -119,6 +119,7 @@ def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
     Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
     """
     out = q_deg.copy()
+    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
     out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
     out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
     return out
