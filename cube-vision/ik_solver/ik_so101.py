@@ -18,13 +18,13 @@ except ModuleNotFoundError:
 # Path to the URDF model (shared with frame_transform)
 _URDF_PATH = Path(__file__).resolve().parent.parent / "frame_transform" / "xlerobot" / "xlerobot.urdf"
 
-# Joints to keep in the reduced model (second arm only)
-_ARM_JOINTS = {"Rotation_2", "Pitch_2", "Elbow_2", "Wrist_Pitch_2", "Wrist_Roll_2"}
+# Joints to keep in the reduced model (first arm only)
+_ARM_JOINTS = {"Rotation", "Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"}
 
 
 class IK_SO101:
     def __init__(self) -> None:
-        # Build reduced model from URDF with only the second arm's 5 joints
+        # Build reduced model from URDF with only the first arm's 5 joints
         full_model = pin.buildModelFromUrdf(str(_URDF_PATH))
         q_neutral = pin.neutral(full_model)
 
@@ -36,15 +36,15 @@ class IK_SO101:
         self.data = self.model.createData()
 
         # EE frame
-        self.EE_FRAME = "Fixed_Jaw_2"
+        self.EE_FRAME = "Fixed_Jaw"
 
-        # Precompute the fixed Base_2 -> world transform (for converting targets)
+        # Precompute the fixed Base -> world transform (for converting targets)
         q = pin.neutral(self.model)
         pin.forwardKinematics(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
-        base2_oMf = self.data.oMf[self.model.getFrameId("Base_2")]
-        self._base2_R = base2_oMf.rotation.copy()
-        self._base2_t = base2_oMf.translation.copy()
+        base_oMf = self.data.oMf[self.model.getFrameId("Base")]
+        self._base_R = base_oMf.rotation.copy()
+        self._base_t = base_oMf.translation.copy()
 
         # IK timestep
         self.dt = 0.01  # 100 Hz
@@ -58,16 +58,15 @@ class IK_SO101:
         self.posture_task = PostureTask(cost=1e-4)
         self.tasks = [self.ee_task, self.posture_task]
 
-    def base2_to_world(self, p_base2: np.ndarray) -> np.ndarray:
-        """Convert a point from Base_2 frame to the pinocchio world frame.
+    def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
+        """Convert a point from Base frame to the pinocchio world frame.
 
-        Base_2 frame convention (from URDF):
-            -Y is forward (arm reach direction)
-            +X is left
-            +Z is up
-        Base_2 is rotated 180° around Z from the world frame.
+        Base frame in URDF has Rz(90°) relative to world:
+            local -Y → world +X  (arm reach direction)
+            local +X → world +Y
+            local +Z → world +Z  (up)
         """
-        return self._base2_R @ np.asarray(p_base2) + self._base2_t
+        return self._base_R @ np.asarray(p_base) + self._base_t
 
     # Seed configurations for multi-start IK (degrees, converted to rad at use).
     # Neutral + "arm raised" seeds to escape local minima for high targets.
@@ -121,13 +120,13 @@ class IK_SO101:
 
     def generate_ik(
         self,
-        target_xyz: list[float],  # [x, y, z] in Base_2 frame
-        gripper_offset_xyz: list[float],  # [x, y, z] in Base_2 frame
+        target_xyz: list[float],  # [x, y, z] in Base frame
+        gripper_offset_xyz: list[float],  # [x, y, z] in Base frame
         position_tolerance: float = 1e-3,
         max_timesteps: int = 1000,
     ):
-        base2_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
-        xyz = self.base2_to_world(base2_xyz)
+        base_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
+        xyz = self.base_to_world(base_xyz)
         target_transform = pin.SE3(np.eye(3), xyz)
 
         best_traj: list[np.ndarray] = []
@@ -195,17 +194,17 @@ class IK_SO101:
 if __name__ == "__main__":
     arm = IK_SO101()
 
-    # Target in Base_2 frame: -Y is forward, +X is left, +Z is up
-    target_base2 = [0.0, -0.30, 0.01]
+    # Target in Base frame: -Y is forward, +X is left, +Z is up
+    target_base = [0.0, -0.30, 0.01]
 
-    print(f"Target in Base_2 frame: {target_base2}")
+    print(f"Target in Base frame: {target_base}")
     print(f"Generating IK trajectory...")
 
-    traj = arm.generate_ik(target_xyz=target_base2, gripper_offset_xyz=[0, 0, 0])
+    traj = arm.generate_ik(target_xyz=target_base, gripper_offset_xyz=[0, 0, 0])
 
     if len(traj) > 0:
         print(f"Success! Trajectory has {len(traj)} steps.")
-        target_world = arm.base2_to_world(target_base2).tolist()
+        target_world = arm.base_to_world(target_base).tolist()
         arm.visualize_ik(traj, object_xyz=target_world)
     else:
         print("IK Failed or target out of reach.")

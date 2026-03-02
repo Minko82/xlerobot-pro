@@ -9,7 +9,7 @@ Usage:
     # Interactive — prompts for measured position:
     python test_vision_transform.py
 
-    # Supply ground truth on the command line (meters, Base_2 frame):
+    # Supply ground truth on the command line (meters, Base frame):
     python test_vision_transform.py --truth 0.05 0.25 0.01
 
     # Use a different color:
@@ -74,14 +74,14 @@ def run_test(color: str, ground_truth: np.ndarray | None, skip_capture: bool):
     )
     computed = np.array([bx, by, bz])
 
-    print(f"\n=== Transformed to Base_2 frame ===")
+    print(f"\n=== Transformed to Base frame ===")
     print(f"  Computed: [{bx:.4f}, {by:.4f}, {bz:.4f}] m")
 
     # ── Compare ─────────────────────────────────────────────────────────
     if ground_truth is None:
         print(
-            "\n>>> Enter the tape-measured position in the Base_2 frame (meters)."
-            "\n    Base_2 convention: +X = left, -Y = forward, +Z = up"
+            "\n>>> Enter the tape-measured position in the Base frame (meters)."
+            "\n    Base convention: +X = left, -Y = forward, +Z = up"
             "\n    (relative to the arm base mounting point)"
         )
         raw = input("    x y z: ").strip().split()
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--color", default="red", choices=["red", "green", "blue"],
                         help="Object color to detect (default: red)")
     parser.add_argument("--truth", nargs=3, type=float, metavar=("X", "Y", "Z"),
-                        help="Ground truth position in Base_2 frame (meters)")
+                        help="Ground truth position in Base frame (meters)")
     parser.add_argument("--skip-capture", action="store_true",
                         help="Skip RealSense capture, reuse saved frames")
     args = parser.parse_args()

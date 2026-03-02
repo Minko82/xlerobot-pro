@@ -107,10 +107,10 @@ print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f
 
 ik_solve = IK_SO101()
 
-# camera_xyz_to_base_xyz returns coordinates in Base_2 frame.
-# generate_ik accepts Base_2 frame coordinates directly (it converts to world internally).
+# camera_xyz_to_base_xyz returns coordinates in Base frame.
+# generate_ik accepts Base frame coordinates directly (it converts to world internally).
 target_base = [arm_frame_x, arm_frame_y, arm_frame_z]
-print(f"IK target (Base_2 frame): [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
+print(f"IK target (Base frame): [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
 
 dt = 0.01
 

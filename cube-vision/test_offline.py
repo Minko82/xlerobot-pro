@@ -9,11 +9,11 @@ No motors, no RealSense, no hardware needed.  Only requires:
 Tests cover:
   1. URDF loading & model structure
   2. Forward kinematics sanity
-  3. Frame transform (camera → Base_2)
+  3. Frame transform (camera → Base)
   4. IK solver convergence (multiple targets)
   5. IK solver determinism (repeated calls)
   6. Motor mapping (URDF deg → motor deg)
-  7. Full pipeline round-trip (synthetic camera point → Base_2 → IK → FK → verify)
+  7. Full pipeline round-trip (synthetic camera point → Base → IK → FK → verify)
 
 Usage:
     cd cube-vision
@@ -91,7 +91,7 @@ def test_urdf_loading():
 
     # Check expected frames exist
     data = model.createData()
-    expected_frames = ["Base_2", "Fixed_Jaw_2", "head_camera_link"]
+    expected_frames = ["Base", "Fixed_Jaw", "head_camera_link"]
     for fname in expected_frames:
         fid = model.getFrameId(fname)
         check(f"Frame '{fname}' in model", fid < model.nframes,
@@ -117,21 +117,21 @@ def test_fk_sanity(model: pin.Model):
     pin.forwardKinematics(model, data, q)
     pin.updateFramePlacements(model, data)
 
-    # Base_2 should be at a fixed known position (not origin)
-    base2_id = model.getFrameId("Base_2")
-    base2_pos = data.oMf[base2_id].translation.copy()
-    print(f"  Base_2 position (neutral): [{base2_pos[0]:.4f}, {base2_pos[1]:.4f}, {base2_pos[2]:.4f}]")
-    check("Base_2 not at origin (is mounted)", np.linalg.norm(base2_pos) > 0.01,
-          f"|pos|={np.linalg.norm(base2_pos):.4f}")
+    # Base should be at a fixed known position (not origin)
+    base_id = model.getFrameId("Base")
+    base_pos = data.oMf[base_id].translation.copy()
+    print(f"  Base position (neutral): [{base_pos[0]:.4f}, {base_pos[1]:.4f}, {base_pos[2]:.4f}]")
+    check("Base not at origin (is mounted)", np.linalg.norm(base_pos) > 0.01,
+          f"|pos|={np.linalg.norm(base_pos):.4f}")
 
-    # EE at neutral should be somewhere reasonable relative to Base_2
-    ee_id = model.getFrameId("Fixed_Jaw_2")
+    # EE at neutral should be somewhere reasonable relative to Base
+    ee_id = model.getFrameId("Fixed_Jaw")
     ee_pos = data.oMf[ee_id].translation.copy()
-    print(f"  Fixed_Jaw_2 position (neutral): [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}]")
+    print(f"  Fixed_Jaw position (neutral): [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}]")
 
-    ee_in_base = data.oMf[base2_id].rotation.T @ (ee_pos - base2_pos)
+    ee_in_base = data.oMf[base_id].rotation.T @ (ee_pos - base_pos)
     dist = np.linalg.norm(ee_in_base)
-    print(f"  EE in Base_2 frame (neutral): [{ee_in_base[0]:.4f}, {ee_in_base[1]:.4f}, {ee_in_base[2]:.4f}]")
+    print(f"  EE in Base frame (neutral): [{ee_in_base[0]:.4f}, {ee_in_base[1]:.4f}, {ee_in_base[2]:.4f}]")
     print(f"  Distance from base: {dist:.4f} m")
     check("EE within reasonable arm reach", 0.05 < dist < 0.5,
           f"dist={dist:.4f}")
@@ -140,18 +140,18 @@ def test_fk_sanity(model: pin.Model):
     cam_id = model.getFrameId("head_camera_link")
     cam_pos = data.oMf[cam_id].translation.copy()
     print(f"  Camera link position (neutral): [{cam_pos[0]:.4f}, {cam_pos[1]:.4f}, {cam_pos[2]:.4f}]")
-    check("Camera above Base_2 (Z)", cam_pos[2] > base2_pos[2],
-          f"cam_z={cam_pos[2]:.4f}, base_z={base2_pos[2]:.4f}")
+    check("Camera above Base (Z)", cam_pos[2] > base_pos[2],
+          f"cam_z={cam_pos[2]:.4f}, base_z={base_pos[2]:.4f}")
 
-    return base2_pos, ee_pos
+    return base_pos, ee_pos
 
 
 # ---------------------------------------------------------------------------
-# 3. Frame Transform (camera → Base_2)
+# 3. Frame Transform (camera → Base)
 # ---------------------------------------------------------------------------
 
 def test_frame_transform():
-    section("3. Frame Transform (camera → Base_2)")
+    section("3. Frame Transform (camera → Base)")
 
     from frame_transform.frame_transform import camera_xyz_to_base_xyz, _head_motor_to_mjcf
 
@@ -173,23 +173,23 @@ def test_frame_transform():
     # Point 30cm straight ahead in camera optical frame
     bx, by, bz = camera_xyz_to_base_xyz(0.0, 0.0, 0.30, joint_values)
     result = np.array([bx, by, bz])
-    print(f"  Camera (0, 0, 0.30) → Base_2: [{bx:.4f}, {by:.4f}, {bz:.4f}]")
+    print(f"  Camera (0, 0, 0.30) → Base: [{bx:.4f}, {by:.4f}, {bz:.4f}]")
     check("Transform produces finite result", np.all(np.isfinite(result)))
     check("Horizontal distance > 0", np.sqrt(bx**2 + by**2) > 0.01,
           f"horiz_dist={np.sqrt(bx**2 + by**2):.4f}")
 
     # Point slightly to the right in camera optical frame
     bx2, by2, bz2 = camera_xyz_to_base_xyz(0.05, 0.0, 0.30, joint_values)
-    print(f"  Camera (0.05, 0, 0.30) → Base_2: [{bx2:.4f}, {by2:.4f}, {bz2:.4f}]")
+    print(f"  Camera (0.05, 0, 0.30) → Base: [{bx2:.4f}, {by2:.4f}, {bz2:.4f}]")
     shift = np.array([bx2 - bx, by2 - by, bz2 - bz])
-    check("Shifting camera X changes Base_2 position", np.linalg.norm(shift) > 0.01,
+    check("Shifting camera X changes Base position", np.linalg.norm(shift) > 0.01,
           f"|shift|={np.linalg.norm(shift):.4f}")
 
     # Point below in camera optical frame
     bx3, by3, bz3 = camera_xyz_to_base_xyz(0.0, 0.05, 0.30, joint_values)
-    print(f"  Camera (0, 0.05, 0.30) → Base_2: [{bx3:.4f}, {by3:.4f}, {bz3:.4f}]")
+    print(f"  Camera (0, 0.05, 0.30) → Base: [{bx3:.4f}, {by3:.4f}, {bz3:.4f}]")
     z_shift = bz3 - bz
-    check("Camera +Y (down) lowers Base_2 Z", z_shift < -0.01,
+    check("Camera +Y (down) lowers Base Z", z_shift < -0.01,
           f"z_shift={z_shift:.4f}")
 
     # Test with panned head (20° pan motor)
@@ -198,7 +198,7 @@ def test_frame_transform():
         "head_tilt_joint": 14.0 * DEG2RAD,
     }
     bx4, by4, bz4 = camera_xyz_to_base_xyz(0.0, 0.0, 0.30, joint_panned)
-    print(f"  Camera (0,0,0.3) with 20° pan → Base_2: [{bx4:.4f}, {by4:.4f}, {bz4:.4f}]")
+    print(f"  Camera (0,0,0.3) with 20° pan → Base: [{bx4:.4f}, {by4:.4f}, {bz4:.4f}]")
     pan_shift = np.linalg.norm(np.array([bx4, by4]) - np.array([bx, by]))
     check("Head pan changes horizontal position", pan_shift > 0.01,
           f"|xy_shift|={pan_shift:.4f}")
@@ -215,7 +215,7 @@ def test_ik_convergence():
 
     ik = IK_SO101()
 
-    # Test targets in Base_2 frame
+    # Test targets in Base frame
     targets = [
         ("Forward 20cm",        [0.0, -0.20, 0.05]),
         ("Forward 25cm",        [0.0, -0.25, 0.05]),
@@ -240,8 +240,8 @@ def test_ik_convergence():
         pin.forwardKinematics(ik_fresh.model, ik_fresh.data, final_q)
         pin.updateFramePlacements(ik_fresh.model, ik_fresh.data)
 
-        ee_world = ik_fresh.data.oMf[ik_fresh.model.getFrameId("Fixed_Jaw_2")].translation.copy()
-        target_world = ik_fresh.base2_to_world(np.array(target))
+        ee_world = ik_fresh.data.oMf[ik_fresh.model.getFrameId("Fixed_Jaw")].translation.copy()
+        target_world = ik_fresh.base_to_world(np.array(target))
         error = np.linalg.norm(ee_world - target_world)
 
         converged = error < 0.005  # 5mm
@@ -255,8 +255,8 @@ def test_ik_convergence():
         final_q = traj_far[-1]
         pin.forwardKinematics(ik_far.model, ik_far.data, final_q)
         pin.updateFramePlacements(ik_far.model, ik_far.data)
-        ee_world = ik_far.data.oMf[ik_far.model.getFrameId("Fixed_Jaw_2")].translation.copy()
-        target_world = ik_far.base2_to_world(np.array([0.0, -1.0, 0.0]))
+        ee_world = ik_far.data.oMf[ik_far.model.getFrameId("Fixed_Jaw")].translation.copy()
+        target_world = ik_far.base_to_world(np.array([0.0, -1.0, 0.0]))
         error = np.linalg.norm(ee_world - target_world)
         check("IK unreachable target doesn't claim success", error > 0.1,
               f"error={error*1000:.1f}mm (should be large)")
@@ -382,9 +382,9 @@ def test_full_pipeline_roundtrip():
     from frame_transform.frame_transform import camera_xyz_to_base_xyz
     from ik_solver import IK_SO101
 
-    # Simulate: object is at a known Base_2 position.
-    # We'll go backwards (Base_2 → camera) to get a synthetic camera point,
-    # then forward (camera → Base_2 → IK) and verify consistency.
+    # Simulate: object is at a known Base position.
+    # We'll go backwards (Base → camera) to get a synthetic camera point,
+    # then forward (camera → Base → IK) and verify consistency.
 
     # Step A: Use FK to find where the camera sees a point
     # For this test, we pick a synthetic camera-optical-frame point directly
@@ -396,18 +396,18 @@ def test_full_pipeline_roundtrip():
     }
 
     # Synthetic camera point: object 20cm ahead, slightly right and below
-    # (must transform to a Base_2 target within the arm's ~0.39m reach)
+    # (must transform to a Base target within the arm's ~0.39m reach)
     cam_point = np.array([0.02, 0.05, 0.20])
 
-    # Step B: Transform to Base_2
+    # Step B: Transform to Base
     bx, by, bz = camera_xyz_to_base_xyz(cam_point[0], cam_point[1], cam_point[2], joint_values)
     base_target = np.array([bx, by, bz])
 
     print(f"  Synthetic camera point: {cam_point.tolist()}")
-    print(f"  Transformed to Base_2:  [{bx:.4f}, {by:.4f}, {bz:.4f}]")
+    print(f"  Transformed to Base:  [{bx:.4f}, {by:.4f}, {bz:.4f}]")
     print(f"  Distance from base:     {np.linalg.norm(base_target):.4f} m")
 
-    check("Transform gives finite Base_2 coords", np.all(np.isfinite(base_target)))
+    check("Transform gives finite Base coords", np.all(np.isfinite(base_target)))
 
     # Step C: IK to reach the target
     ik = IK_SO101()
@@ -421,8 +421,8 @@ def test_full_pipeline_roundtrip():
         pin.forwardKinematics(ik.model, ik.data, final_q)
         pin.updateFramePlacements(ik.model, ik.data)
 
-        ee_world = ik.data.oMf[ik.model.getFrameId("Fixed_Jaw_2")].translation.copy()
-        target_world = ik.base2_to_world(base_target)
+        ee_world = ik.data.oMf[ik.model.getFrameId("Fixed_Jaw")].translation.copy()
+        target_world = ik.base_to_world(base_target)
 
         ik_error = np.linalg.norm(ee_world - target_world)
         print(f"  IK target (world): [{target_world[0]:.4f}, {target_world[1]:.4f}, {target_world[2]:.4f}]")

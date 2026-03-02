@@ -21,7 +21,7 @@ _model = pin.buildModelFromUrdf(str(_URDF_PATH))
 _data = _model.createData()
 
 # Frame IDs (resolved once)
-_BASE_FRAME_ID = _model.getFrameId("Base_2")
+_BASE_FRAME_ID = _model.getFrameId("Base")
 # NOTE: "head_camera_rgb_frame" has an optical-frame euler that makes its Z axis
 # align with the tilt rotation axis (Y), so tilt has no effect on its orientation
 # in pinocchio. Instead we use "head_camera_link" (which tilts correctly) and
@@ -47,14 +47,11 @@ _R_LINK_TO_OPTICAL = np.array([
     [0, -1, 0],
 ])
 
-# Empirical correction between the MJCF camera chain and the arm Base frame.
-# The Rz(-90°) correction is the same for both Base and Base_2 because the
-# 180° frame rotation and the 180° change in raw output cancel out.
-_R_BASE_CORRECTION = np.array([
-    [0.0, 1.0, 0.0],   # x' = y
-    [-1.0, 0.0, 0.0],  # y' = -x
-    [0.0, 0.0, 1.0],   # z' = z
-])
+# No base correction needed: pinocchio FK computes the exact rigid transform
+# from camera optical frame to Base frame.  The IK solver's base_to_world()
+# uses the same pinocchio rotation, so the round-trip is exact:
+#   p_world = R_base @ (R_base^T @ (R_cam @ p + t_cam - t_base)) + t_base
+#           = R_cam @ p + t_cam
 
 # Joint indices for the head (resolved once)
 _HEAD_PAN_IDX = _model.joints[_model.getJointId("head_pan_joint")].idx_q
@@ -149,6 +146,5 @@ def camera_xyz_to_base_xyz(
 
     p_cam = np.array([x, y, z, 1.0], dtype=float)
     p_base = (T @ p_cam)[:3]
-    p_base = _R_BASE_CORRECTION @ p_base
 
     return float(p_base[0]), float(p_base[1]), float(p_base[2])

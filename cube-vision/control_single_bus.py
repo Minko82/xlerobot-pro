@@ -92,7 +92,7 @@ print(
 
 # Visualize the IK target in Base frame
 save_ik_plot(
-    base_pos=ik_solve._base2_t,
+    base_pos=ik_solve._base_t,
     ik_target_base=np.array(target_base),
     camera_centroid_cam=np.array(centroid),
 )
