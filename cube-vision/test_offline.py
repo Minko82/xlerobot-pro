@@ -2,17 +2,17 @@
 """Offline test suite — validates the full pipeline WITHOUT the physical robot.
 
 No motors, no RealSense, no hardware needed.  Only requires:
-  - pinocchio  (URDF loading + FK)
+  - pinocchio  (MJCF loading + FK)
   - pink       (IK solver)
   - numpy
 
 Tests cover:
-  1. URDF loading & model structure
+  1. MJCF loading & model structure
   2. Forward kinematics sanity
   3. Frame transform (camera → Base)
   4. IK solver convergence (multiple targets)
   5. IK solver determinism (repeated calls)
-  6. Motor mapping (URDF deg → motor deg)
+  6. Motor mapping (MJCF deg → motor deg)
   7. Full pipeline round-trip (synthetic camera point → Base → IK → FK → verify)
 
 Usage:
@@ -33,7 +33,7 @@ import pinocchio as pin
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_URDF_PATH = _HERE / "frame_transform" / "xlerobot" / "xlerobot.urdf"
+_MJCF_PATH = _HERE / "frame_transform" / "xlerobot" / "xlerobot.xml"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,24 +66,26 @@ def section(title: str):
 
 
 # ---------------------------------------------------------------------------
-# 1. URDF Loading & Model Structure
+# 1. MJCF Loading & Model Structure
 # ---------------------------------------------------------------------------
 
-def test_urdf_loading():
-    section("1. URDF Loading & Model Structure")
+def test_mjcf_loading():
+    section("1. MJCF Loading & Model Structure")
 
-    check("URDF file exists", _URDF_PATH.exists(), str(_URDF_PATH))
+    check("MJCF file exists", _MJCF_PATH.exists(), str(_MJCF_PATH))
 
-    model = pin.buildModelFromUrdf(str(_URDF_PATH))
+    model = pin.buildModelFromMJCF(str(_MJCF_PATH))
     check("Model loads successfully", model.njoints > 1,
           f"{model.njoints} joints (including universe)")
 
     # Check expected joint names exist
     joint_names = [model.names[i] for i in range(model.njoints)]
-    expected_arm2 = ["Rotation_2", "Pitch_2", "Elbow_2", "Wrist_Pitch_2", "Wrist_Roll_2"]
+    expected_arm1 = ["Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"]
+    expected_arm2 = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"]
     expected_head = ["head_pan_joint", "head_tilt_joint"]
-    expected_arm1 = ["Rotation", "Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"]
 
+    for jname in expected_arm1:
+        check(f"Joint '{jname}' in model", jname in joint_names)
     for jname in expected_arm2:
         check(f"Joint '{jname}' in model", jname in joint_names)
     for jname in expected_head:
@@ -317,7 +319,7 @@ def test_ik_determinism():
 # ---------------------------------------------------------------------------
 
 def test_motor_mapping():
-    section("6. Motor Mapping (URDF deg → motor deg)")
+    section("6. Motor Mapping (MJCF deg → motor deg)")
 
     def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
         """Same mapping used in control_single_bus.py / control.py."""
@@ -337,7 +339,7 @@ def test_motor_mapping():
     original = np.array([10.0, 45.0, -30.0, 20.0, 0.0])
     motor = mjcf_to_motor(original)
     recovered = motor_to_mjcf(motor)
-    check("Round-trip URDF→motor→URDF",
+    check("Round-trip MJCF→motor→MJCF",
           np.allclose(original, recovered),
           f"max diff={np.max(np.abs(original - recovered)):.6f}°")
 
@@ -345,9 +347,9 @@ def test_motor_mapping():
     # If URDF pitch = 0°, motor shoulder_lift should = 90°
     zero_urdf = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
     zero_motor = mjcf_to_motor(zero_urdf)
-    check("URDF all-zero: motor shoulder_lift=90°",
+    check("MJCF all-zero: motor shoulder_lift=90°",
           abs(zero_motor[1] - 90.0) < 0.01, f"got {zero_motor[1]:.2f}°")
-    check("URDF all-zero: motor elbow_flex=-90°",
+    check("MJCF all-zero: motor elbow_flex=-90°",
           abs(zero_motor[2] - (-90.0)) < 0.01, f"got {zero_motor[2]:.2f}°")
 
     # Rotation and wrist joints pass through unchanged
@@ -363,7 +365,7 @@ def test_motor_mapping():
         final_rad = traj[-1]
         final_deg = final_rad * RAD2DEG
         motor_deg = mjcf_to_motor(final_deg)
-        print(f"  IK final (URDF deg): {np.round(final_deg, 2).tolist()}")
+        print(f"  IK final (MJCF deg): {np.round(final_deg, 2).tolist()}")
         print(f"  IK final (motor deg): {np.round(motor_deg, 2).tolist()}")
 
         # Motors should be within ±180° (the physical range is ~±150°)
@@ -466,7 +468,7 @@ def main():
     print("  OFFLINE TEST SUITE — No robot hardware required")
     print("=" * 60)
 
-    model = test_urdf_loading()
+    model = test_mjcf_loading()
     test_fk_sanity(model)
     test_frame_transform()
     test_ik_convergence()

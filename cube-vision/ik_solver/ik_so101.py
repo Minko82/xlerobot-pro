@@ -15,17 +15,17 @@ try:
 except ModuleNotFoundError:
     MeshcatVisualizer = None
 
-# Path to the URDF model (shared with frame_transform)
-_URDF_PATH = Path(__file__).resolve().parent.parent / "frame_transform" / "xlerobot" / "xlerobot.urdf"
+# Path to the MJCF model (shared with frame_transform)
+_MJCF_PATH = Path(__file__).resolve().parent.parent / "frame_transform" / "xlerobot" / "xlerobot.xml"
 
 # Joints to keep in the reduced model (first arm only)
-_ARM_JOINTS = {"Rotation", "Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"}
+_ARM_JOINTS = {"Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"}
 
 
 class IK_SO101:
     def __init__(self) -> None:
-        # Build reduced model from URDF with only the first arm's 5 joints
-        full_model = pin.buildModelFromUrdf(str(_URDF_PATH))
+        # Build reduced model from MJCF with only the first arm's 5 joints
+        full_model = pin.buildModelFromMJCF(str(_MJCF_PATH))
         q_neutral = pin.neutral(full_model)
 
         lock_ids = [
@@ -59,13 +59,7 @@ class IK_SO101:
         self.tasks = [self.ee_task, self.posture_task]
 
     def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
-        """Convert a point from Base frame to the pinocchio world frame.
-
-        Base frame in URDF has Rz(90°) relative to world:
-            local -Y → world +X  (arm reach direction)
-            local +X → world +Y
-            local +Z → world +Z  (up)
-        """
+        """Convert a point from Base frame to the pinocchio world frame."""
         return self._base_R @ np.asarray(p_base) + self._base_t
 
     # Seed configurations for multi-start IK (degrees, converted to rad at use).
@@ -194,8 +188,7 @@ class IK_SO101:
 if __name__ == "__main__":
     arm = IK_SO101()
 
-    # Target in Base frame: -Y is forward, +X is left, +Z is up
-    target_base = [0.0, -0.30, 0.01]
+    target_base = [0.0, 0.30, 0.01]
 
     print(f"Target in Base frame: {target_base}")
     print(f"Generating IK trajectory...")
