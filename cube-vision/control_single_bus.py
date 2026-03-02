@@ -13,7 +13,7 @@ DEG2RAD = np.pi / 180.0
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = 0.0
+IK_TARGET_OFFSET_X_M = -0.05
 IK_TARGET_OFFSET_Y_M = 0.0
 IK_TARGET_OFFSET_Z_M = 0.0
 

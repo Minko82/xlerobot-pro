@@ -68,7 +68,7 @@ def _head_motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
         pan motor reads ~1°, tilt motor reads ~14° at MJCF zero.
     """
     out = q_deg.copy()
-    out[0] = out[0] - 1.0
+    out[0] = -(out[0] - 1.0)
     out[1] = out[1] - 14.0
     return out
 
