@@ -172,7 +172,3 @@ data/
 
 # Dev folders
 .cache/*
-*.stl
-*.urdf
-*.xml
-*.part
