@@ -17,6 +17,9 @@ IK_TARGET_OFFSET_X_M = -0.07
 IK_TARGET_OFFSET_Y_M = 0.0
 IK_TARGET_OFFSET_Z_M = 0.00
 
+# Height above the target to hover before descending (meters)
+HOVER_HEIGHT_M = 0.10
+
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
 bus.connect()
@@ -109,21 +112,23 @@ print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f
 
 ik_solve = IK_SO101()
 
-# camera_xyz_to_base_xyz returns coordinates in Base frame (+Y is forward)
-# generate_ik accepts Base frame coordinates directly
+# Compute final target (at the cube) and hover target (above the cube)
 target_base = [
     arm_frame_x + IK_TARGET_OFFSET_X_M,
     arm_frame_y + IK_TARGET_OFFSET_Y_M,
     arm_frame_z + IK_TARGET_OFFSET_Z_M,
 ]
+hover_base = [
+    target_base[0],
+    target_base[1],
+    target_base[2] + HOVER_HEIGHT_M,
+]
 print(
     "IK target offsets (m): "
     f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
 )
-print(
-    f"IK target (Base frame, offset): "
-    f"[{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]"
-)
+print(f"Final target (Base frame):  [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
+print(f"Hover target (Base frame):  [{hover_base[0]:.4f}, {hover_base[1]:.4f}, {hover_base[2]:.4f}]")
 
 # Visualize the IK target in Base frame
 save_ik_plot(
@@ -142,20 +147,6 @@ current_mjcf_rad = current_mjcf_deg * DEG2RAD
 print(f"Current arm positions (motor deg): {current_motor_deg}")
 print(f"Current arm positions (MJCF deg):  {current_mjcf_deg}")
 
-print("Running IK solver...")
-trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
-if not trajectory_rad:
-    print("IK failed — no trajectory returned. Target may be out of reach.")
-    print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
-    print(f"  Base world pos: {ik_solve._base_t}")
-    bus.disconnect()
-    raise SystemExit(1)
-
-print(f"IK succeeded: {len(trajectory_rad)} steps")
-print(f"  Final joint config (rad): {trajectory_rad[-1]}")
-print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
-
-
 
 def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     """Convert a list of joint configs (radians) to motor goal dicts (degrees)."""
@@ -168,26 +159,57 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-# Move to 10cm above target (gripper open)
-goals = traj_to_goals(trajectory_rad)
-print(f"Sending {len(goals)} waypoints to motors...")
-print(f"  First goal: {goals[0]}")
-print(f"  Last goal:  {goals[-1]}")
-for i, goal in enumerate(goals):
-    goal["gripper"] = 100.0
-    bus.sync_write("Goal_Position", goal)
-    time.sleep(dt)
+def send_trajectory(goals: list[dict], gripper_deg: float, hold_time: float):
+    """Send a list of motor goal dicts, then hold the final position."""
+    for goal in goals:
+        goal["gripper"] = gripper_deg
+        bus.sync_write("Goal_Position", goal)
+        time.sleep(dt)
+    # Re-send final goal and hold so motors physically reach it
+    final = goals[-1].copy()
+    final["gripper"] = gripper_deg
+    bus.sync_write("Goal_Position", final)
+    time.sleep(hold_time)
 
-# Re-send final goal and hold so motors have time to physically reach it
-final_goal = goals[-1].copy()
-final_goal["gripper"] = 100.0
-bus.sync_write("Goal_Position", final_goal)
-print("Trajectory sent. Holding final position for 5 seconds...")
-time.sleep(5.0)
 
-# Read back actual positions to verify movement
+# ── Stage 1: Move to hover point above the cube ──
+print("\n── Stage 1: Moving to hover point above cube ──")
+hover_traj = ik_solve.generate_ik(hover_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
+if not hover_traj:
+    print("IK failed for hover target.")
+    print(f"  Hover target: {hover_base}")
+    bus.disconnect()
+    raise SystemExit(1)
+print(f"Hover IK succeeded: {len(hover_traj)} steps")
+
+hover_goals = traj_to_goals(hover_traj)
+print(f"  First goal: {hover_goals[0]}")
+print(f"  Last goal:  {hover_goals[-1]}")
+send_trajectory(hover_goals, gripper_deg=100.0, hold_time=3.0)
+print("Hover position reached.")
+
+# ── Stage 2: Descend to the cube ──
+print("\n── Stage 2: Descending to cube ──")
+# Seed the descent from the hover configuration for a smooth vertical path
+hover_q_rad = hover_traj[-1]
+descend_traj = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=hover_q_rad)
+if not descend_traj:
+    print("IK failed for descent target.")
+    print(f"  Descent target: {target_base}")
+    bus.disconnect()
+    raise SystemExit(1)
+print(f"Descent IK succeeded: {len(descend_traj)} steps")
+
+descend_goals = traj_to_goals(descend_traj)
+print(f"  First goal: {descend_goals[0]}")
+print(f"  Last goal:  {descend_goals[-1]}")
+send_trajectory(descend_goals, gripper_deg=100.0, hold_time=3.0)
+print("Descent complete — at cube.")
+
+# Read back actual positions to verify
 actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
-print("Actual motor positions (deg):")
+final_goal = descend_goals[-1]
+print("\nActual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
     print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
 print("Done.")
