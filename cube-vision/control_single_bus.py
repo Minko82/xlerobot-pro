@@ -159,51 +159,43 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-def send_trajectory(goals: list[dict], gripper_deg: float, hold_time: float):
-    """Send a list of motor goal dicts, then hold the final position."""
-    for goal in goals:
-        goal["gripper"] = gripper_deg
-        bus.sync_write("Goal_Position", goal)
-        time.sleep(dt)
-    # Re-send final goal and hold so motors physically reach it
-    final = goals[-1].copy()
-    final["gripper"] = gripper_deg
-    bus.sync_write("Goal_Position", final)
+def send_goal(goal: dict, gripper_deg: float, hold_time: float):
+    """Send a single motor goal position and hold for the specified time."""
+    goal["gripper"] = gripper_deg
+    bus.sync_write("Goal_Position", goal)
+    print(f"  Goal sent: {goal}")
     time.sleep(hold_time)
+
+
+def solve_ik_final(label: str, target, seed_q_rad):
+    """Run IK and return only the final converged configuration (rad)."""
+    traj = ik_solve.generate_ik(target, [0, 0, 0], seed_q_rad=seed_q_rad)
+    if not traj:
+        print(f"IK failed for {label}. Target: {target}")
+        bus.disconnect()
+        raise SystemExit(1)
+    q_final = traj[-1]
+    print(f"{label} IK converged in {len(traj)} steps")
+    print(f"  Final (MJCF deg): {np.rad2deg(q_final)}")
+    return q_final
+
+
+def q_rad_to_goal(q_rad: np.ndarray) -> dict:
+    """Convert a single joint config (rad) to a motor goal dict (deg)."""
+    q_deg = mjcf_to_motor(q_rad * RAD2DEG)
+    return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
 
 
 # ── Stage 1: Move to hover point above the cube ──
 print("\n── Stage 1: Moving to hover point above cube ──")
-hover_traj = ik_solve.generate_ik(hover_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
-if not hover_traj:
-    print("IK failed for hover target.")
-    print(f"  Hover target: {hover_base}")
-    bus.disconnect()
-    raise SystemExit(1)
-print(f"Hover IK succeeded: {len(hover_traj)} steps")
-
-hover_goals = traj_to_goals(hover_traj)
-print(f"  First goal: {hover_goals[0]}")
-print(f"  Last goal:  {hover_goals[-1]}")
-send_trajectory(hover_goals, gripper_deg=100.0, hold_time=3.0)
+hover_q = solve_ik_final("Hover", hover_base, current_mjcf_rad)
+send_goal(q_rad_to_goal(hover_q), gripper_deg=100.0, hold_time=5.0)
 print("Hover position reached.")
 
 # ── Stage 2: Descend to the cube ──
 print("\n── Stage 2: Descending to cube ──")
-# Seed the descent from the hover configuration for a smooth vertical path
-hover_q_rad = hover_traj[-1]
-descend_traj = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=hover_q_rad)
-if not descend_traj:
-    print("IK failed for descent target.")
-    print(f"  Descent target: {target_base}")
-    bus.disconnect()
-    raise SystemExit(1)
-print(f"Descent IK succeeded: {len(descend_traj)} steps")
-
-descend_goals = traj_to_goals(descend_traj)
-print(f"  First goal: {descend_goals[0]}")
-print(f"  Last goal:  {descend_goals[-1]}")
-send_trajectory(descend_goals, gripper_deg=100.0, hold_time=3.0)
+descend_q = solve_ik_final("Descent", target_base, hover_q)
+send_goal(q_rad_to_goal(descend_q), gripper_deg=100.0, hold_time=3.0)
 print("Descent complete — at cube.")
 
 # Read back actual positions to verify
