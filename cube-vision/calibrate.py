@@ -18,14 +18,22 @@ import argparse
 from pathlib import Path
 
 CALIBRATION_DIR = Path(__file__).resolve().parent / "calibration"
-DEFAULT_CALIBRATION_FILE = CALIBRATION_DIR / "single_bus.json"
+DEFAULT_ARM_CALIBRATION_FILE = CALIBRATION_DIR / "arm_bus.json"
+DEFAULT_HEAD_CALIBRATION_FILE = CALIBRATION_DIR / "head_bus.json"
 
-BUS_PORT = "/dev/ttyACM0"
+ARM_BUS_PORT = "/dev/ttyACM0"   # bus0: both arms (IDs 1-12)
+HEAD_BUS_PORT = "/dev/ttyACM1"  # bus1: head motors (IDs 1-2)
 
-# Motor definitions (shared with control_single_bus.py)
-MOTOR_DEFS = {
-    "head_motor_1": Motor(2, "sts3215", MotorNormMode.DEGREES),  # pan (ID 2)
-    "head_motor_2": Motor(1, "sts3215", MotorNormMode.DEGREES),  # tilt (ID 1)
+# Motor definitions for arm bus (bus0) — both arms
+ARM_MOTOR_DEFS = {
+    # Base_2 arm (IDs 1-6)
+    "shoulder_pan_2":  Motor(1,  "sts3215", MotorNormMode.DEGREES),
+    "shoulder_lift_2": Motor(2,  "sts3215", MotorNormMode.DEGREES),
+    "elbow_flex_2":    Motor(3,  "sts3215", MotorNormMode.DEGREES),
+    "wrist_flex_2":    Motor(4,  "sts3215", MotorNormMode.DEGREES),
+    "wrist_roll_2":    Motor(5,  "sts3215", MotorNormMode.DEGREES),
+    "gripper_2":       Motor(6,  "sts3215", MotorNormMode.RANGE_0_100),
+    # Base arm (IDs 7-12)
     "shoulder_pan":  Motor(7,  "sts3215", MotorNormMode.DEGREES),
     "shoulder_lift": Motor(8,  "sts3215", MotorNormMode.DEGREES),
     "elbow_flex":    Motor(9,  "sts3215", MotorNormMode.DEGREES),
@@ -33,6 +41,16 @@ MOTOR_DEFS = {
     "wrist_roll":    Motor(11, "sts3215", MotorNormMode.DEGREES),
     "gripper":       Motor(12, "sts3215", MotorNormMode.RANGE_0_100),
 }
+
+# Motor definitions for head bus (bus1)
+HEAD_MOTOR_DEFS = {
+    "head_pan":  Motor(2, "sts3215", MotorNormMode.DEGREES),   # pan (ID 2)
+    "head_tilt": Motor(1, "sts3215", MotorNormMode.DEGREES),   # tilt (ID 1)
+}
+
+# Legacy aliases for backwards compatibility
+BUS_PORT = ARM_BUS_PORT
+MOTOR_DEFS = {**ARM_MOTOR_DEFS, **HEAD_MOTOR_DEFS}
 
 
 def load_calibration(bus: FeetechMotorsBus, filepath: Path) -> dict:
@@ -95,7 +113,7 @@ def run_interactive_calibration(bus: FeetechMotorsBus, filepath: Path) -> dict:
 
 def load_or_run_calibration(
     bus: FeetechMotorsBus,
-    filepath: Path = DEFAULT_CALIBRATION_FILE,
+    filepath: Path = DEFAULT_ARM_CALIBRATION_FILE,
     force: bool = False,
 ) -> dict:
     """Load existing calibration or run interactive calibration if missing.
@@ -120,33 +138,38 @@ def load_or_run_calibration(
 def main():
     parser = argparse.ArgumentParser(description="Calibrate SO-101 motors")
     parser.add_argument(
-        "--file", type=Path, default=DEFAULT_CALIBRATION_FILE,
-        help=f"Calibration file path (default: {DEFAULT_CALIBRATION_FILE})",
+        "--bus", choices=["arm", "head", "all"], default="all",
+        help="Which bus to calibrate (default: all)",
     )
     parser.add_argument(
         "--force", action="store_true",
         help="Recalibrate even if calibration file already exists",
     )
-    parser.add_argument(
-        "--port", type=str, default=BUS_PORT,
-        help=f"Serial port (default: {BUS_PORT})",
-    )
     args = parser.parse_args()
 
-    bus = FeetechMotorsBus(port=args.port, motors=MOTOR_DEFS)
-    bus.connect()
-
+    buses = []
     try:
-        # Always recalibrate when run standalone; --force is kept for explicitness
-        load_or_run_calibration(bus, filepath=args.file, force=True)
+        if args.bus in ("arm", "all"):
+            arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
+            arm_bus.connect()
+            buses.append(("arm", arm_bus, DEFAULT_ARM_CALIBRATION_FILE))
 
-        # Print current positions to verify
-        print("\nCalibrated positions:")
-        positions = bus.sync_read("Present_Position", list(bus.motors.keys()))
-        for name, val in positions.items():
-            print(f"  {name}: {float(val):.2f}")
+        if args.bus in ("head", "all"):
+            head_bus = FeetechMotorsBus(port=HEAD_BUS_PORT, motors=HEAD_MOTOR_DEFS)
+            head_bus.connect()
+            buses.append(("head", head_bus, DEFAULT_HEAD_CALIBRATION_FILE))
+
+        for label, bus, calib_file in buses:
+            print(f"\n=== Calibrating {label} bus ===")
+            load_or_run_calibration(bus, filepath=calib_file, force=True)
+
+            print(f"\nCalibrated positions ({label}):")
+            positions = bus.sync_read("Present_Position", list(bus.motors.keys()))
+            for name, val in positions.items():
+                print(f"  {name}: {float(val):.2f}")
     finally:
-        bus.disconnect()
+        for _, bus, _ in buses:
+            bus.disconnect()
 
 
 if __name__ == "__main__":

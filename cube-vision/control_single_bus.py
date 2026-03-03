@@ -5,7 +5,12 @@ from ik_solver import IK_SO101
 from color_detect import detect_object
 from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
-from calibrate import MOTOR_DEFS, BUS_PORT, load_or_run_calibration
+from calibrate import (
+    ARM_MOTOR_DEFS, HEAD_MOTOR_DEFS,
+    ARM_BUS_PORT, HEAD_BUS_PORT,
+    DEFAULT_ARM_CALIBRATION_FILE, DEFAULT_HEAD_CALIBRATION_FILE,
+    load_or_run_calibration,
+)
 from visualize_ik import save_ik_plot
 import time
 
@@ -13,21 +18,24 @@ DEG2RAD = np.pi / 180.0
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = -0.05
+IK_TARGET_OFFSET_X_M = -0.065
 IK_TARGET_OFFSET_Y_M = 0.0
 IK_TARGET_OFFSET_Z_M = 0.0
 
-# Single bus with head (IDs 1-2) and arm (IDs 7-12)
-bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
-bus.connect()
+# bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
+arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
+arm_bus.connect()
+load_or_run_calibration(arm_bus, filepath=DEFAULT_ARM_CALIBRATION_FILE)
 
-# Load or create calibration for all motors
-load_or_run_calibration(bus)
+# bus1: head motors (pan ID 2, tilt ID 1)
+head_bus = FeetechMotorsBus(port=HEAD_BUS_PORT, motors=HEAD_MOTOR_DEFS)
+head_bus.connect()
+load_or_run_calibration(head_bus, filepath=DEFAULT_HEAD_CALIBRATION_FILE)
 
 # Read head positions (calibrated)
-head_pos = bus.sync_read("Present_Position", ["head_motor_1", "head_motor_2"])
-head_pan_deg = float(head_pos["head_motor_1"])
-head_tilt_deg = float(head_pos["head_motor_2"])
+head_pos = head_bus.sync_read("Present_Position", ["head_pan", "head_tilt"])
+head_pan_deg = float(head_pos["head_pan"])
+head_tilt_deg = float(head_pos["head_tilt"])
 print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 
 # Apply limits to right arm only
@@ -54,7 +62,7 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
+apply_limits(arm_bus, arm_motors, 200, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
@@ -105,7 +113,8 @@ if not trajectory_rad:
     print("IK failed — no trajectory returned. Target may be out of reach.")
     print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
     print(f"  Base world pos: {ik_solve._base_t}")
-    bus.disconnect()
+    arm_bus.disconnect()
+    head_bus.disconnect()
     raise SystemExit(1)
 
 print(f"IK succeeded: {len(trajectory_rad)} steps")
@@ -154,20 +163,21 @@ print(f"  First goal: {goals[0]}")
 print(f"  Last goal:  {goals[-1]}")
 for i, goal in enumerate(goals):
     goal["gripper"] = 100.0
-    bus.sync_write("Goal_Position", goal)
+    arm_bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
 # Re-send final goal and hold so motors have time to physically reach it
 final_goal = goals[-1].copy()
 final_goal["gripper"] = 100.0
-bus.sync_write("Goal_Position", final_goal)
+arm_bus.sync_write("Goal_Position", final_goal)
 print("Trajectory sent. Holding final position for 5 seconds...")
 time.sleep(5.0)
 
 # Read back actual positions to verify movement
-actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
+actual = arm_bus.sync_read("Present_Position", ARM_JOINT_KEYS)
 print("Actual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
     print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
 print("Done.")
-bus.disconnect()
+arm_bus.disconnect()
+head_bus.disconnect()
