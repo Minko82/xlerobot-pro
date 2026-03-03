@@ -13,12 +13,9 @@ DEG2RAD = np.pi / 180.0
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = -0.07
-IK_TARGET_OFFSET_Y_M = 0.0
-IK_TARGET_OFFSET_Z_M = 0.00
-
-# Height above the target to hover before descending (meters)
-HOVER_HEIGHT_M = 0.10
+IK_TARGET_OFFSET_X_M = -0.12
+IK_TARGET_OFFSET_Y_M = 0.06
+IK_TARGET_OFFSET_Z_M = 0.10
 
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
@@ -39,41 +36,6 @@ arm_motors = [
     "wrist_flex", "wrist_roll", "gripper",
 ]
 
-RAD2DEG = 180.0 / np.pi
-
-ARM_JOINT_KEYS = [
-    "shoulder_pan",
-    "shoulder_lift",
-    "elbow_flex",
-    "wrist_flex",
-    "wrist_roll",
-]
-
-
-def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
-    """Convert motor convention angles (degrees) to MJCF joint angles (degrees).
-
-    Inverse of mjcf_to_motor.
-    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
-    """
-    out = q_deg.copy()
-    out[0] = -out[0]          # motor positive = right -> MJCF positive = left
-    out[1] = 90.0 - out[1]   # shoulder_lift -> Pitch_L
-    out[2] = out[2] + 90.0   # elbow_flex -> Elbow_L
-    return out
-
-
-def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
-    """Convert MJCF joint angles (degrees) to motor convention (degrees).
-
-    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
-    """
-    out = q_deg.copy()
-    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
-    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
-    return out
-
 
 def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d: int):
     print("Applying motor limits:")
@@ -92,7 +54,7 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
+apply_limits(bus, arm_motors, 500, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
@@ -112,23 +74,21 @@ print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f
 
 ik_solve = IK_SO101()
 
-# Compute final target (at the cube) and hover target (above the cube)
+# camera_xyz_to_base_xyz returns coordinates in Base frame (+Y is forward)
+# generate_ik accepts Base frame coordinates directly
 target_base = [
     arm_frame_x + IK_TARGET_OFFSET_X_M,
     arm_frame_y + IK_TARGET_OFFSET_Y_M,
     arm_frame_z + IK_TARGET_OFFSET_Z_M,
 ]
-hover_base = [
-    target_base[0],
-    target_base[1],
-    target_base[2] + HOVER_HEIGHT_M,
-]
 print(
     "IK target offsets (m): "
     f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
 )
-print(f"Final target (Base frame):  [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
-print(f"Hover target (Base frame):  [{hover_base[0]:.4f}, {hover_base[1]:.4f}, {hover_base[2]:.4f}]")
+print(
+    f"IK target (Base frame, offset): "
+    f"[{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]"
+)
 
 # Visualize the IK target in Base frame
 save_ik_plot(
@@ -139,13 +99,53 @@ save_ik_plot(
 
 dt = 0.01
 
-# Read current arm positions to use as IK seed (smoother trajectories from current pose)
+# Read current arm positions to seed IK from actual pose
+ARM_JOINT_KEYS = [
+    "shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll",
+]
 current_arm_pos = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
 current_motor_deg = np.array([float(current_arm_pos[j]) for j in ARM_JOINT_KEYS])
-current_mjcf_deg = motor_to_mjcf(current_motor_deg)
-current_mjcf_rad = current_mjcf_deg * DEG2RAD
-print(f"Current arm positions (motor deg): {current_motor_deg}")
-print(f"Current arm positions (MJCF deg):  {current_mjcf_deg}")
+
+
+def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
+    out = q_deg.copy()
+    out[0] = -out[0]
+    out[1] = 90.0 - out[1]
+    out[2] = out[2] + 90.0
+    return out
+
+
+current_mjcf_rad = motor_to_mjcf(current_motor_deg) * DEG2RAD
+print(f"Current arm (motor deg): {current_motor_deg}")
+print(f"Current arm (MJCF deg):  {motor_to_mjcf(current_motor_deg)}")
+
+print("Running IK solver...")
+trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
+if not trajectory_rad:
+    print("IK failed — no trajectory returned. Target may be out of reach.")
+    print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
+    print(f"  Base world pos: {ik_solve._base_t}")
+    bus.disconnect()
+    raise SystemExit(1)
+
+print(f"IK succeeded: {len(trajectory_rad)} steps")
+print(f"  Final joint config (rad): {trajectory_rad[-1]}")
+print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
+
+
+def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
+    """Convert MJCF joint angles (degrees) to motor convention (degrees).
+
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
+    """
+    out = q_deg.copy()
+    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
+    return out
+
+
+RAD2DEG = 180.0 / np.pi
 
 
 def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
@@ -159,108 +159,26 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-def send_goal(goal: dict, gripper_deg: float, hold_time: float):
-    """Send a single motor goal position and hold for the specified time."""
-    goal["gripper"] = gripper_deg
+# Move to 10cm above target (gripper open)
+goals = traj_to_goals(trajectory_rad)
+print(f"Sending {len(goals)} waypoints to motors...")
+print(f"  First goal: {goals[0]}")
+print(f"  Last goal:  {goals[-1]}")
+for i, goal in enumerate(goals):
+    goal["gripper"] = 100.0
     bus.sync_write("Goal_Position", goal)
-    print(f"  Goal sent: {goal}")
-    time.sleep(hold_time)
+    time.sleep(dt)
 
+# Re-send final goal and hold so motors have time to physically reach it
+final_goal = goals[-1].copy()
+final_goal["gripper"] = 100.0
+bus.sync_write("Goal_Position", final_goal)
+print("Trajectory sent. Holding final position for 5 seconds...")
+time.sleep(5.0)
 
-def cartesian_move(start_q_rad, start_base, end_base, gripper_deg=100.0,
-                   n_waypoints=10, step_time=0.3):
-    """Move along a straight Cartesian line by solving IK at intermediate points.
-
-    This avoids joint-space interpolation dips by sending many small goals that
-    each track the desired Cartesian path.
-    """
-    start_xyz = np.array(start_base, dtype=float)
-    end_xyz = np.array(end_base, dtype=float)
-    seed = start_q_rad.copy()
-    for i in range(1, n_waypoints + 1):
-        alpha = i / n_waypoints
-        waypoint = start_xyz + alpha * (end_xyz - start_xyz)
-        traj = ik_solve.generate_ik(waypoint.tolist(), [0, 0, 0], seed_q_rad=seed)
-        if not traj:
-            print(f"  IK failed at waypoint {i}/{n_waypoints}: {waypoint}")
-            continue
-        seed = traj[-1]
-        goal = q_rad_to_goal(seed)
-        goal["gripper"] = gripper_deg
-        bus.sync_write("Goal_Position", goal)
-        time.sleep(step_time)
-    return seed
-
-
-def solve_ik_final(label: str, target, seed_q_rad):
-    """Run IK and return only the final converged configuration (rad)."""
-    traj = ik_solve.generate_ik(target, [0, 0, 0], seed_q_rad=seed_q_rad)
-    if not traj:
-        print(f"IK failed for {label}. Target: {target}")
-        bus.disconnect()
-        raise SystemExit(1)
-    q_final = traj[-1]
-    print(f"{label} IK converged in {len(traj)} steps")
-    print(f"  Final (MJCF deg): {np.rad2deg(q_final)}")
-    return q_final
-
-
-def q_rad_to_goal(q_rad: np.ndarray) -> dict:
-    """Convert a single joint config (rad) to a motor goal dict (deg)."""
-    q_deg = mjcf_to_motor(q_rad * RAD2DEG)
-    return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
-
-
-# ── Compute current EE position via FK ──
-import pinocchio as pin
-
-RETRACT_HEIGHT_M = 0.12  # how high to lift before moving laterally
-
-pin.forwardKinematics(ik_solve.model, ik_solve.data, current_mjcf_rad)
-pin.updateFramePlacements(ik_solve.model, ik_solve.data)
-ee_frame_id = ik_solve.model.getFrameId(ik_solve.EE_FRAME)
-current_ee_world = ik_solve.data.oMf[ee_frame_id].translation.copy()
-current_ee_base = ik_solve._base_R.T @ (current_ee_world - ik_solve._base_t)
-
-retract_base = [
-    float(current_ee_base[0]),
-    float(current_ee_base[1]),
-    float(current_ee_base[2]) + RETRACT_HEIGHT_M,
-]
-safe_z = max(retract_base[2], hover_base[2])
-above_cube_high = [target_base[0], target_base[1], safe_z]
-
-print(f"\nCurrent EE (Base): [{current_ee_base[0]:.4f}, {current_ee_base[1]:.4f}, {current_ee_base[2]:.4f}]")
-print(f"Retract target:    [{retract_base[0]:.4f}, {retract_base[1]:.4f}, {retract_base[2]:.4f}]")
-print(f"Above-cube target: [{above_cube_high[0]:.4f}, {above_cube_high[1]:.4f}, {above_cube_high[2]:.4f}]")
-print(f"Hover target:      [{hover_base[0]:.4f}, {hover_base[1]:.4f}, {hover_base[2]:.4f}]")
-print(f"Cube target:       [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
-
-# ── Stage 0: Retract straight up ──
-print("\n── Stage 0: Retracting arm upward (Cartesian) ──")
-retract_q = cartesian_move(current_mjcf_rad, current_ee_base.tolist(), retract_base)
-print("Retract complete.")
-
-# ── Stage 1: Move laterally to above cube at safe height ──
-print("\n── Stage 1: Moving laterally above cube (Cartesian) ──")
-above_q = cartesian_move(retract_q, retract_base, above_cube_high)
-print("Lateral move complete.")
-
-# ── Stage 2: Descend to hover height ──
-print("\n── Stage 2: Descending to hover height (Cartesian) ──")
-hover_q = cartesian_move(above_q, above_cube_high, hover_base)
-print("Hover reached.")
-time.sleep(2.0)
-
-# ── Stage 3: Descend to the cube ──
-print("\n── Stage 3: Descending to cube (Cartesian) ──")
-descend_q = cartesian_move(hover_q, hover_base, target_base, n_waypoints=10, step_time=0.2)
-print("Descent complete — at cube.")
-
-# Read back actual positions to verify
+# Read back actual positions to verify movement
 actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
-final_goal = q_rad_to_goal(descend_q)
-print("\nActual motor positions (deg):")
+print("Actual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
     print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
 print("Done.")

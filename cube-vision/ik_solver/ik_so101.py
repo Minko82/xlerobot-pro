@@ -55,8 +55,12 @@ class IK_SO101:
 
         # Pink tasks
         self.ee_task = FrameTask(self.EE_FRAME, position_cost=10.0, orientation_cost=0.0)
-        self.posture_task = PostureTask(cost=1e-4)
+        self.posture_task = PostureTask(cost=1e-2)
         self.tasks = [self.ee_task, self.posture_task]
+
+        # Preferred "elbow-up" posture (MJCF deg): shoulder and elbow high
+        # so Pink biases toward concave poses where the gripper approaches from above.
+        self._elbow_up_q = np.deg2rad([0.0, 90.0, 90.0, 0.0, 0.0])
 
     def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
         """Convert a point from Base frame to the pinocchio world frame."""
@@ -80,7 +84,7 @@ class IK_SO101:
         """Run IK from a given seed configuration. Returns (trajectory, final_error)."""
         self.configuration = pink.Configuration(self.model, self.data, q_seed.copy())
         self.ee_task.set_target(target_transform)
-        self.posture_task.set_target(q_seed)
+        self.posture_task.set_target(self._elbow_up_q)
 
         trajectory: list[np.ndarray] = []
         ee_frame_id = self.model.getFrameId(self.EE_FRAME)
@@ -127,7 +131,7 @@ class IK_SO101:
         best_traj: list[np.ndarray] = []
         best_error = float("inf")
 
-        # Build seed list: user-provided seed first, then hardcoded defaults
+        # Build seed list: caller-provided seed first, then hardcoded defaults
         seeds_rad = []
         if seed_q_rad is not None:
             seeds_rad.append(np.asarray(seed_q_rad, dtype=float))
@@ -135,7 +139,6 @@ class IK_SO101:
             seeds_rad.append(np.deg2rad(seed_deg))
 
         for q_seed in seeds_rad:
-            # Clamp seed to joint limits
             q_seed = np.clip(
                 q_seed,
                 self.model.lowerPositionLimit,
@@ -147,7 +150,6 @@ class IK_SO101:
             if error < best_error:
                 best_error = error
                 best_traj = traj
-            # Early exit if we already converged
             if best_error < position_tolerance:
                 break
 
