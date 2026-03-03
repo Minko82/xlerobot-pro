@@ -54,7 +54,7 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(bus, arm_motors, 500, 10, 8, 0, 32)
+apply_limits(bus, [m for m in arm_motors if m != "gripper"], 500, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
