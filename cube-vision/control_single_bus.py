@@ -167,6 +167,31 @@ def send_goal(goal: dict, gripper_deg: float, hold_time: float):
     time.sleep(hold_time)
 
 
+def cartesian_move(start_q_rad, start_base, end_base, gripper_deg=100.0,
+                   n_waypoints=10, step_time=0.3):
+    """Move along a straight Cartesian line by solving IK at intermediate points.
+
+    This avoids joint-space interpolation dips by sending many small goals that
+    each track the desired Cartesian path.
+    """
+    start_xyz = np.array(start_base, dtype=float)
+    end_xyz = np.array(end_base, dtype=float)
+    seed = start_q_rad.copy()
+    for i in range(1, n_waypoints + 1):
+        alpha = i / n_waypoints
+        waypoint = start_xyz + alpha * (end_xyz - start_xyz)
+        traj = ik_solve.generate_ik(waypoint.tolist(), [0, 0, 0], seed_q_rad=seed)
+        if not traj:
+            print(f"  IK failed at waypoint {i}/{n_waypoints}: {waypoint}")
+            continue
+        seed = traj[-1]
+        goal = q_rad_to_goal(seed)
+        goal["gripper"] = gripper_deg
+        bus.sync_write("Goal_Position", goal)
+        time.sleep(step_time)
+    return seed
+
+
 def solve_ik_final(label: str, target, seed_q_rad):
     """Run IK and return only the final converged configuration (rad)."""
     traj = ik_solve.generate_ik(target, [0, 0, 0], seed_q_rad=seed_q_rad)
@@ -186,21 +211,55 @@ def q_rad_to_goal(q_rad: np.ndarray) -> dict:
     return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
 
 
-# ── Stage 1: Move to hover point above the cube ──
-print("\n── Stage 1: Moving to hover point above cube ──")
-hover_q = solve_ik_final("Hover", hover_base, current_mjcf_rad)
-send_goal(q_rad_to_goal(hover_q), gripper_deg=100.0, hold_time=5.0)
-print("Hover position reached.")
+# ── Compute current EE position via FK ──
+import pinocchio as pin
 
-# ── Stage 2: Descend to the cube ──
-print("\n── Stage 2: Descending to cube ──")
-descend_q = solve_ik_final("Descent", target_base, hover_q)
-send_goal(q_rad_to_goal(descend_q), gripper_deg=100.0, hold_time=3.0)
+RETRACT_HEIGHT_M = 0.12  # how high to lift before moving laterally
+
+pin.forwardKinematics(ik_solve.model, ik_solve.data, current_mjcf_rad)
+pin.updateFramePlacements(ik_solve.model, ik_solve.data)
+ee_frame_id = ik_solve.model.getFrameId(ik_solve.EE_FRAME)
+current_ee_world = ik_solve.data.oMf[ee_frame_id].translation.copy()
+current_ee_base = ik_solve._base_R.T @ (current_ee_world - ik_solve._base_t)
+
+retract_base = [
+    float(current_ee_base[0]),
+    float(current_ee_base[1]),
+    float(current_ee_base[2]) + RETRACT_HEIGHT_M,
+]
+safe_z = max(retract_base[2], hover_base[2])
+above_cube_high = [target_base[0], target_base[1], safe_z]
+
+print(f"\nCurrent EE (Base): [{current_ee_base[0]:.4f}, {current_ee_base[1]:.4f}, {current_ee_base[2]:.4f}]")
+print(f"Retract target:    [{retract_base[0]:.4f}, {retract_base[1]:.4f}, {retract_base[2]:.4f}]")
+print(f"Above-cube target: [{above_cube_high[0]:.4f}, {above_cube_high[1]:.4f}, {above_cube_high[2]:.4f}]")
+print(f"Hover target:      [{hover_base[0]:.4f}, {hover_base[1]:.4f}, {hover_base[2]:.4f}]")
+print(f"Cube target:       [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
+
+# ── Stage 0: Retract straight up ──
+print("\n── Stage 0: Retracting arm upward (Cartesian) ──")
+retract_q = cartesian_move(current_mjcf_rad, current_ee_base.tolist(), retract_base)
+print("Retract complete.")
+
+# ── Stage 1: Move laterally to above cube at safe height ──
+print("\n── Stage 1: Moving laterally above cube (Cartesian) ──")
+above_q = cartesian_move(retract_q, retract_base, above_cube_high)
+print("Lateral move complete.")
+
+# ── Stage 2: Descend to hover height ──
+print("\n── Stage 2: Descending to hover height (Cartesian) ──")
+hover_q = cartesian_move(above_q, above_cube_high, hover_base)
+print("Hover reached.")
+time.sleep(2.0)
+
+# ── Stage 3: Descend to the cube ──
+print("\n── Stage 3: Descending to cube (Cartesian) ──")
+descend_q = cartesian_move(hover_q, hover_base, target_base, n_waypoints=10, step_time=0.2)
 print("Descent complete — at cube.")
 
 # Read back actual positions to verify
 actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
-final_goal = descend_goals[-1]
+final_goal = q_rad_to_goal(descend_q)
 print("\nActual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
     print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
