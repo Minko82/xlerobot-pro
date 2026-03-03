@@ -18,16 +18,19 @@ except ModuleNotFoundError:
 # Path to the MJCF model (shared with frame_transform)
 _MJCF_PATH = Path(__file__).resolve().parent.parent / "frame_transform" / "xlerobot" / "xlerobot.xml"
 
-# Joints to keep in the reduced model (first arm only)
-_ARM_JOINTS = {"Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"}
+# Joints to keep in the reduced model (both arms, 5 per arm)
+_LEFT_ARM_JOINTS = ["Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"]
+_RIGHT_ARM_JOINTS = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"]
+_ARM_JOINTS = set(_LEFT_ARM_JOINTS + _RIGHT_ARM_JOINTS)
 
 
 class IK_SO101:
     def __init__(self) -> None:
-        # Build reduced model from MJCF with only the first arm's 5 joints
+        # Build reduced model from MJCF keeping only the 10 arm joints
         full_model = pin.buildModelFromMJCF(str(_MJCF_PATH))
         q_neutral = pin.neutral(full_model)
 
+        # Lock everything except arm joints (lock head, wheels, jaw joints)
         lock_ids = [
             i for i in range(1, full_model.njoints)
             if full_model.names[i] not in _ARM_JOINTS
@@ -35,16 +38,32 @@ class IK_SO101:
         self.model = pin.buildReducedModel(full_model, lock_ids, q_neutral)
         self.data = self.model.createData()
 
-        # EE frame
-        self.EE_FRAME = "Fixed_Jaw"
+        # Map joint names to indices in reduced model q vector
+        self._joint_q_idx = {}
+        for i in range(1, self.model.njoints):
+            name = self.model.names[i]
+            self._joint_q_idx[name] = self.model.joints[i].idx_q
 
-        # Precompute the fixed Base -> world transform (for converting targets)
+        # Compute q-vector index slices for each arm
+        self._left_q_indices = np.array([self._joint_q_idx[j] for j in _LEFT_ARM_JOINTS])
+        self._right_q_indices = np.array([self._joint_q_idx[j] for j in _RIGHT_ARM_JOINTS])
+
+        # EE frame names
+        self.EE_LEFT = "Fixed_Jaw"
+        self.EE_RIGHT = "Fixed_Jaw_2"
+
+        # Precompute fixed Base and Base_2 transforms (at neutral config)
         q = pin.neutral(self.model)
         pin.forwardKinematics(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
+
         base_oMf = self.data.oMf[self.model.getFrameId("Base")]
         self._base_R = base_oMf.rotation.copy()
         self._base_t = base_oMf.translation.copy()
+
+        base2_oMf = self.data.oMf[self.model.getFrameId("Base_2")]
+        self._base2_R = base2_oMf.rotation.copy()
+        self._base2_t = base2_oMf.translation.copy()
 
         # IK timestep
         self.dt = 0.01  # 100 Hz
@@ -53,37 +72,87 @@ class IK_SO101:
         self.q = pin.neutral(self.model)
         self.configuration = pink.Configuration(self.model, self.data, self.q)
 
-        # Pink tasks
-        self.ee_task = FrameTask(self.EE_FRAME, position_cost=10.0, orientation_cost=0.0)
+        # Pink tasks: one FrameTask per EE + posture
+        self.ee_left_task = FrameTask(self.EE_LEFT, position_cost=10.0, orientation_cost=0.0)
+        self.ee_right_task = FrameTask(self.EE_RIGHT, position_cost=10.0, orientation_cost=0.0)
         self.posture_task = PostureTask(cost=1e-4)
-        self.tasks = [self.ee_task, self.posture_task]
+        self.tasks = [self.ee_left_task, self.ee_right_task, self.posture_task]
 
     def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
         """Convert a point from Base frame to the pinocchio world frame."""
         return self._base_R @ np.asarray(p_base) + self._base_t
 
+    def base2_to_world(self, p_base2: np.ndarray) -> np.ndarray:
+        """Convert a point from Base_2 frame to the pinocchio world frame."""
+        return self._base2_R @ np.asarray(p_base2) + self._base2_t
+
+    def choose_arm(self, target_base_xyz: np.ndarray, target_base2_xyz: np.ndarray) -> str:
+        """Pick the closer arm by comparing distance from target to each arm's base.
+
+        Both targets should be in their respective arm's Base frame.
+        Returns "left" or "right".
+        """
+        dist_left = np.linalg.norm(target_base_xyz)
+        dist_right = np.linalg.norm(target_base2_xyz)
+        chosen = "left" if dist_left <= dist_right else "right"
+        print(f"Arm selection: left dist={dist_left:.4f}, right dist={dist_right:.4f} → {chosen}")
+        return chosen
+
+    def _get_current_ee_world_pos(self, ee_frame_name: str) -> np.ndarray:
+        """Get current EE position in world frame from the current configuration."""
+        pin.forwardKinematics(self.model, self.data, self.configuration.q)
+        pin.updateFramePlacements(self.model, self.data)
+        fid = self.model.getFrameId(ee_frame_name)
+        return self.data.oMf[fid].translation.copy()
+
     # Seed configurations for multi-start IK (degrees, converted to rad at use).
-    # Neutral + "arm raised" seeds to escape local minima for high targets.
     _SEED_CONFIGS_DEG = [
-        [0.0, 0.0, 0.0, 0.0, 0.0],         # neutral (arm extended forward)
+        [0.0, 0.0, 0.0, 0.0, 0.0],         # neutral
         [0.0, 90.0, 90.0, 0.0, 0.0],        # shoulder + elbow at 90°
         [0.0, 135.0, 135.0, 45.0, 0.0],     # arm folded back / raised
     ]
 
+    def _build_seed_q(self, seed_deg_5: list[float], arm: str) -> np.ndarray:
+        """Build a full 10-joint q_seed with the given 5-DOF seed for one arm,
+        and neutral (zeros) for the other arm."""
+        q_seed = pin.neutral(self.model)
+        seed_rad = np.deg2rad(seed_deg_5)
+        if arm == "left":
+            q_seed[self._left_q_indices] = seed_rad
+        else:
+            q_seed[self._right_q_indices] = seed_rad
+        # Clamp to joint limits
+        q_seed = np.clip(q_seed, self.model.lowerPositionLimit, self.model.upperPositionLimit)
+        return q_seed
+
     def _run_ik_from_seed(
         self,
         q_seed: np.ndarray,
+        active_ee_frame: str,
         target_transform: "pin.SE3",
+        idle_ee_frame: str,
+        idle_target: "pin.SE3",
         position_tolerance: float,
         max_timesteps: int,
     ) -> tuple[list[np.ndarray], float]:
-        """Run IK from a given seed configuration. Returns (trajectory, final_error)."""
+        """Run IK from a given seed. Returns (trajectory of full q, final_error)."""
         self.configuration = pink.Configuration(self.model, self.data, q_seed.copy())
-        self.ee_task.set_target(target_transform)
+
+        # Set active arm EE to desired target
+        active_task = self.ee_left_task if active_ee_frame == self.EE_LEFT else self.ee_right_task
+        idle_task = self.ee_right_task if active_ee_frame == self.EE_LEFT else self.ee_left_task
+
+        active_task.set_target(target_transform)
+        idle_task.set_target(idle_target)
+
+        # High cost on idle arm to keep it still
+        active_task.position_cost = 10.0
+        idle_task.position_cost = 100.0
+
         self.posture_task.set_target(q_seed)
 
         trajectory: list[np.ndarray] = []
-        ee_frame_id = self.model.getFrameId(self.EE_FRAME)
+        ee_frame_id = self.model.getFrameId(active_ee_frame)
 
         for step in range(max_timesteps):
             pin.forwardKinematics(self.model, self.data, self.configuration.q)
@@ -104,7 +173,7 @@ class IK_SO101:
             self.configuration.integrate_inplace(dq, self.dt)
             trajectory.append(self.configuration.q.copy())
 
-        # Compute final error
+        # Final error
         pin.forwardKinematics(self.model, self.data, self.configuration.q)
         pin.updateFramePlacements(self.model, self.data)
         final_error = np.linalg.norm(
@@ -112,51 +181,94 @@ class IK_SO101:
         )
         return trajectory, final_error
 
-    def generate_ik(
+    def generate_ik_bimanual(
         self,
-        target_xyz: list[float],  # [x, y, z] in Base frame
-        gripper_offset_xyz: list[float],  # [x, y, z] in Base frame
+        target_xyz: list[float],
+        arm: str = "left",
+        gripper_offset_xyz: list[float] | None = None,
         position_tolerance: float = 1e-3,
         max_timesteps: int = 1000,
-    ):
-        base_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
-        xyz = self.base_to_world(base_xyz)
-        target_transform = pin.SE3(np.eye(3), xyz)
+    ) -> list[np.ndarray]:
+        """Solve IK for one arm while holding the other.
+
+        Parameters
+        ----------
+        target_xyz : [x, y, z] in the active arm's Base frame
+        arm : "left" or "right"
+        gripper_offset_xyz : optional offset in Base frame
+        position_tolerance : convergence threshold (meters)
+        max_timesteps : max IK iterations
+
+        Returns
+        -------
+        Trajectory of 5-joint configs (radians) for the active arm only.
+        """
+        offset = np.asarray(gripper_offset_xyz) if gripper_offset_xyz else np.zeros(3)
+        base_xyz = np.asarray(target_xyz) + offset
+
+        if arm == "left":
+            world_xyz = self.base_to_world(base_xyz)
+            active_ee = self.EE_LEFT
+            idle_ee = self.EE_RIGHT
+            active_indices = self._left_q_indices
+        else:
+            world_xyz = self.base2_to_world(base_xyz)
+            active_ee = self.EE_RIGHT
+            idle_ee = self.EE_LEFT
+            active_indices = self._right_q_indices
+
+        target_transform = pin.SE3(np.eye(3), world_xyz)
+
+        # Get idle arm's current EE position as hold target
+        idle_world_pos = self._get_current_ee_world_pos(idle_ee)
+        idle_target = pin.SE3(np.eye(3), idle_world_pos)
 
         best_traj: list[np.ndarray] = []
         best_error = float("inf")
 
         for seed_deg in self._SEED_CONFIGS_DEG:
-            q_seed = np.deg2rad(seed_deg)
-            # Clamp seed to joint limits
-            q_seed = np.clip(
-                q_seed,
-                self.model.lowerPositionLimit,
-                self.model.upperPositionLimit,
-            )
+            q_seed = self._build_seed_q(seed_deg, arm)
             traj, error = self._run_ik_from_seed(
-                q_seed, target_transform, position_tolerance, max_timesteps,
+                q_seed, active_ee, target_transform,
+                idle_ee, idle_target,
+                position_tolerance, max_timesteps,
             )
             if error < best_error:
                 best_error = error
                 best_traj = traj
-            # Early exit if we already converged
             if best_error < position_tolerance:
                 break
 
-        # Update instance state to match the best result
+        # Update state
         if best_traj:
             self.q = best_traj[-1].copy()
             self.configuration = pink.Configuration(self.model, self.data, self.q)
 
-        return best_traj
+        # Extract active arm's joints only
+        active_traj = [q[active_indices] for q in best_traj]
+        return active_traj
+
+    # Keep the single-arm generate_ik for backwards compatibility
+    def generate_ik(
+        self,
+        target_xyz: list[float],
+        gripper_offset_xyz: list[float],
+        position_tolerance: float = 1e-3,
+        max_timesteps: int = 1000,
+    ):
+        return self.generate_ik_bimanual(
+            target_xyz, arm="left",
+            gripper_offset_xyz=gripper_offset_xyz,
+            position_tolerance=position_tolerance,
+            max_timesteps=max_timesteps,
+        )
 
     def visualize_ik(self, trajectory: list, object_xyz):
         if MeshcatVisualizer is None:
             print("Meshcat failed to import.")
             return
 
-        ee_frame_id = self.model.getFrameId(self.EE_FRAME)
+        ee_frame_id = self.model.getFrameId(self.EE_LEFT)
 
         collision_model = pin.GeometryModel()
         visual_model = pin.GeometryModel()
@@ -188,16 +300,23 @@ class IK_SO101:
 if __name__ == "__main__":
     arm = IK_SO101()
 
+    print(f"Reduced model has {arm.model.njoints - 1} joints:")
+    for i in range(1, arm.model.njoints):
+        name = arm.model.names[i]
+        idx = arm.model.joints[i].idx_q
+        print(f"  [{idx}] {name}")
+
+    print(f"\nLeft arm q indices: {arm._left_q_indices}")
+    print(f"Right arm q indices: {arm._right_q_indices}")
+
     target_base = [0.0, 0.30, 0.01]
+    print(f"\nTarget in Base frame: {target_base}")
+    print(f"Generating bimanual IK for left arm...")
 
-    print(f"Target in Base frame: {target_base}")
-    print(f"Generating IK trajectory...")
-
-    traj = arm.generate_ik(target_xyz=target_base, gripper_offset_xyz=[0, 0, 0])
+    traj = arm.generate_ik_bimanual(target_xyz=target_base, arm="left")
 
     if len(traj) > 0:
         print(f"Success! Trajectory has {len(traj)} steps.")
-        target_world = arm.base_to_world(target_base).tolist()
-        arm.visualize_ik(traj, object_xyz=target_world)
+        print(f"Final joint config (deg): {np.rad2deg(traj[-1])}")
     else:
         print("IK Failed or target out of reach.")

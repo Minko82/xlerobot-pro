@@ -22,6 +22,7 @@ _data = _model.createData()
 
 # Frame IDs (resolved once)
 _BASE_FRAME_ID = _model.getFrameId("Base")
+_BASE_2_FRAME_ID = _model.getFrameId("Base_2")
 # NOTE: "head_camera_rgb_frame" has an optical-frame euler that makes its Z axis
 # align with the tilt rotation axis (Y), so tilt has no effect on its orientation
 # in pinocchio. Instead we use "head_camera_link" (which tilts correctly) and
@@ -142,3 +143,45 @@ def camera_xyz_to_base_xyz(
     p_base = (T @ p_cam)[:3]
 
     return float(p_base[0]), float(p_base[1]), float(p_base[2])
+
+
+def camera_xyz_to_base2_xyz(
+    x: float,
+    y: float,
+    z: float,
+    joint_values: Dict[str, float],
+) -> Tuple[float, float, float]:
+    """Transform (x, y, z) from camera optical frame into the Base_2 (right arm) frame.
+
+    Same logic as camera_xyz_to_base_xyz but using Base_2 as the reference frame.
+    """
+    pan_motor_rad = joint_values.get("head_pan_joint", 0.0)
+    tilt_motor_rad = joint_values.get("head_tilt_joint", 0.0)
+
+    motor_deg = np.array([np.rad2deg(pan_motor_rad), np.rad2deg(tilt_motor_rad)])
+    mjcf_deg = _head_motor_to_mjcf(motor_deg)
+    q_head_mjcf_rad = np.deg2rad(mjcf_deg)
+
+    q = pin.neutral(_model)
+    q[_HEAD_PAN_IDX] = q_head_mjcf_rad[0]
+    q[_HEAD_TILT_IDX] = q_head_mjcf_rad[1]
+
+    pin.forwardKinematics(_model, _data, q)
+    pin.updateFramePlacements(_model, _data)
+
+    oMbase2 = _data.oMf[_BASE_2_FRAME_ID]
+    oMcam_link = _data.oMf[_CAMERA_LINK_FRAME_ID]
+
+    R_cam_optical = oMcam_link.rotation @ _R_LINK_TO_OPTICAL
+
+    R = oMbase2.rotation.T @ R_cam_optical
+    t = oMbase2.rotation.T @ (oMcam_link.translation - oMbase2.translation)
+
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = t
+
+    p_cam = np.array([x, y, z, 1.0], dtype=float)
+    p_base2 = (T @ p_cam)[:3]
+
+    return float(p_base2[0]), float(p_base2[1]), float(p_base2[2])
