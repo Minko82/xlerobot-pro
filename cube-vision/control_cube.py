@@ -54,13 +54,7 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(bus, [m for m in arm_motors if m != "gripper"], 500, 10, 8, 0, 32)
-apply_limits(bus, ["gripper"], 500, 10, 8, 0, 32)
-
-# Open gripper immediately
-print("Opening gripper...")
-bus.sync_write("Goal_Position", {"gripper": 100.0})
-time.sleep(1.0)
+apply_limits(bus, arm_motors, 500, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
@@ -165,19 +159,24 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-# Play IK trajectory (gripper stays open)
+# Open gripper
+print("Opening gripper...")
+for grip in range(0, 101, 5):
+    bus.sync_write("Goal_Position", {"gripper": float(grip)})
+    time.sleep(0.05)
+time.sleep(1.0)
+
+# Play IK trajectory (no gripper control)
 goals = traj_to_goals(trajectory_rad)
 print(f"Sending {len(goals)} waypoints to motors...")
 print(f"  First goal: {goals[0]}")
 print(f"  Last goal:  {goals[-1]}")
 for goal in goals:
-    goal["gripper"] = 100.0
     bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
 # Hold final position
 final_goal = goals[-1].copy()
-final_goal["gripper"] = 100.0
 bus.sync_write("Goal_Position", final_goal)
 print("Holding position for 3 seconds...")
 time.sleep(3.0)
@@ -185,16 +184,44 @@ time.sleep(3.0)
 # Close gripper
 print("Closing gripper...")
 for grip in range(100, -1, -5):
-    final_goal["gripper"] = float(grip)
-    bus.sync_write("Goal_Position", final_goal)
+    bus.sync_write("Goal_Position", {"gripper": float(grip)})
     time.sleep(0.05)
 time.sleep(1.0)
 print("Gripper closed.")
+
+# Move cube 20cm to the right (+X in Base frame)
+drop_base = [
+    target_base[0] + 0.20,
+    target_base[1],
+    target_base[2],
+]
+print(f"\nMoving cube to drop point: [{drop_base[0]:.4f}, {drop_base[1]:.4f}, {drop_base[2]:.4f}]")
+drop_seed = trajectory_rad[-1]
+drop_traj = ik_solve.generate_ik(drop_base, [0, 0, 0], seed_q_rad=drop_seed)
+if not drop_traj:
+    print("IK failed for drop point.")
+    bus.disconnect()
+    raise SystemExit(1)
+print(f"Drop IK: {len(drop_traj)} steps")
+
+drop_goals = traj_to_goals(drop_traj)
+for goal in drop_goals:
+    bus.sync_write("Goal_Position", goal)
+    time.sleep(dt)
+time.sleep(2.0)
+
+# Open gripper to release cube
+print("Releasing cube...")
+for grip in range(0, 101, 5):
+    bus.sync_write("Goal_Position", {"gripper": float(grip)})
+    time.sleep(0.05)
+time.sleep(1.0)
+print("Cube released.")
 
 # Read back actual positions
 actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
 print("Actual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
-    print(f"  {name}: {float(actual[name]):.2f}  (goal: {goals[-1][name]:.2f})")
+    print(f"  {name}: {float(actual[name]):.2f}  (goal: {drop_goals[-1][name]:.2f})")
 print("Done.")
 bus.disconnect()
