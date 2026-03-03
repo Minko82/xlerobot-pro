@@ -118,6 +118,7 @@ class IK_SO101:
         gripper_offset_xyz: list[float],  # [x, y, z] in Base frame
         position_tolerance: float = 1e-3,
         max_timesteps: int = 1000,
+        seed_q_rad: np.ndarray | None = None,
     ):
         base_xyz = np.asarray(target_xyz) + np.asarray(gripper_offset_xyz)
         xyz = self.base_to_world(base_xyz)
@@ -126,8 +127,14 @@ class IK_SO101:
         best_traj: list[np.ndarray] = []
         best_error = float("inf")
 
+        # Build seed list: user-provided seed first, then hardcoded defaults
+        seeds_rad = []
+        if seed_q_rad is not None:
+            seeds_rad.append(np.asarray(seed_q_rad, dtype=float))
         for seed_deg in self._SEED_CONFIGS_DEG:
-            q_seed = np.deg2rad(seed_deg)
+            seeds_rad.append(np.deg2rad(seed_deg))
+
+        for q_seed in seeds_rad:
             # Clamp seed to joint limits
             q_seed = np.clip(
                 q_seed,

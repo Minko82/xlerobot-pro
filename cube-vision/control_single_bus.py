@@ -13,9 +13,9 @@ DEG2RAD = np.pi / 180.0
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = -0.05
+IK_TARGET_OFFSET_X_M = -0.07
 IK_TARGET_OFFSET_Y_M = 0.0
-IK_TARGET_OFFSET_Z_M = 0.0
+IK_TARGET_OFFSET_Z_M = 0.00
 
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
@@ -35,6 +35,41 @@ arm_motors = [
     "shoulder_pan", "shoulder_lift", "elbow_flex",
     "wrist_flex", "wrist_roll", "gripper",
 ]
+
+RAD2DEG = 180.0 / np.pi
+
+ARM_JOINT_KEYS = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+]
+
+
+def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
+    """Convert motor convention angles (degrees) to MJCF joint angles (degrees).
+
+    Inverse of mjcf_to_motor.
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
+    """
+    out = q_deg.copy()
+    out[0] = -out[0]          # motor positive = right -> MJCF positive = left
+    out[1] = 90.0 - out[1]   # shoulder_lift -> Pitch_L
+    out[2] = out[2] + 90.0   # elbow_flex -> Elbow_L
+    return out
+
+
+def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
+    """Convert MJCF joint angles (degrees) to motor convention (degrees).
+
+    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
+    """
+    out = q_deg.copy()
+    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
+    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
+    return out
 
 
 def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d: int):
@@ -99,8 +134,16 @@ save_ik_plot(
 
 dt = 0.01
 
+# Read current arm positions to use as IK seed (smoother trajectories from current pose)
+current_arm_pos = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
+current_motor_deg = np.array([float(current_arm_pos[j]) for j in ARM_JOINT_KEYS])
+current_mjcf_deg = motor_to_mjcf(current_motor_deg)
+current_mjcf_rad = current_mjcf_deg * DEG2RAD
+print(f"Current arm positions (motor deg): {current_motor_deg}")
+print(f"Current arm positions (MJCF deg):  {current_mjcf_deg}")
+
 print("Running IK solver...")
-trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
+trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
 if not trajectory_rad:
     print("IK failed — no trajectory returned. Target may be out of reach.")
     print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
@@ -112,28 +155,6 @@ print(f"IK succeeded: {len(trajectory_rad)} steps")
 print(f"  Final joint config (rad): {trajectory_rad[-1]}")
 print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
 
-
-def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
-    """Convert MJCF joint angles (degrees) to motor convention (degrees).
-
-    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
-    """
-    out = q_deg.copy()
-    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
-    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
-    return out
-
-
-RAD2DEG = 180.0 / np.pi
-
-ARM_JOINT_KEYS = [
-    "shoulder_pan",
-    "shoulder_lift",
-    "elbow_flex",
-    "wrist_flex",
-    "wrist_roll",
-]
 
 
 def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
