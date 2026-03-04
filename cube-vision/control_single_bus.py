@@ -195,10 +195,37 @@ for grip in range(100, -1, -5):
 time.sleep(1.0)
 print("Gripper closed.")
 
+# Lift cube 10cm
+lift_base = [target_base[0], target_base[1], target_base[2] + 0.10]
+print(f"\nLifting to: [{lift_base[0]:.4f}, {lift_base[1]:.4f}, {lift_base[2]:.4f}]")
+lift_traj = ik_solve.generate_ik(lift_base, [0, 0, 0], seed_q_rad=trajectory_rad[-1])
+if not lift_traj:
+    print("IK failed for lift.")
+    bus.disconnect()
+    raise SystemExit(1)
+print(f"Lift IK: {len(lift_traj)} steps")
+lift_goals = traj_to_goals(lift_traj)
+for goal in lift_goals:
+    goal["gripper"] = 0.0
+    goal["wrist_roll"] = current_wrist_roll
+    bus.sync_write("Goal_Position", goal)
+    time.sleep(dt)
+time.sleep(2.0)
+
+# Open gripper to drop
+print("Dropping cube...")
+drop_goal = lift_goals[-1].copy()
+for grip in range(0, 101, 5):
+    drop_goal["gripper"] = float(grip)
+    bus.sync_write("Goal_Position", drop_goal)
+    time.sleep(0.05)
+time.sleep(1.0)
+print("Cube dropped.")
+
 # Read back actual positions
 actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
 print("Actual motor positions (deg):")
 for name in ARM_JOINT_KEYS:
-    print(f"  {name}: {float(actual[name]):.2f}  (goal: {goals[-1][name]:.2f})")
+    print(f"  {name}: {float(actual[name]):.2f}")
 print("Done.")
 bus.disconnect()
