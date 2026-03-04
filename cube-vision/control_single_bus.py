@@ -14,8 +14,8 @@ DEG2RAD = np.pi / 180.0
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
 IK_TARGET_OFFSET_X_M = -0.12
-IK_TARGET_OFFSET_Y_M = 0.06
-IK_TARGET_OFFSET_Z_M = 0.10
+IK_TARGET_OFFSET_Y_M = 0.0
+IK_TARGET_OFFSET_Z_M = 0.05
 
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
@@ -165,19 +165,23 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-# Play IK trajectory (gripper stays open)
+# Play IK trajectory — pin wrist_roll to current position
+current_wrist_roll = float(current_motor_deg[4])
+print(f"Pinning wrist_roll at {current_wrist_roll:.2f} deg")
 goals = traj_to_goals(trajectory_rad)
 print(f"Sending {len(goals)} waypoints to motors...")
-print(f"  First goal: {goals[0]}")
-print(f"  Last goal:  {goals[-1]}")
 for goal in goals:
     goal["gripper"] = 100.0
+    goal["wrist_roll"] = current_wrist_roll
     bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
+print(f"  First goal: {goals[0]}")
+print(f"  Last goal:  {goals[-1]}")
 
 # Hold final position
 final_goal = goals[-1].copy()
 final_goal["gripper"] = 100.0
+final_goal["wrist_roll"] = current_wrist_roll
 bus.sync_write("Goal_Position", final_goal)
 print("Holding position for 3 seconds...")
 time.sleep(3.0)

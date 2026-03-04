@@ -53,13 +53,16 @@ class IK_SO101:
         self.q = pin.neutral(self.model)
         self.configuration = pink.Configuration(self.model, self.data, self.q)
 
+        # Lock Wrist_Roll_L (q[4]) at 0 so gripper can't turn sideways
+        self.model.lowerPositionLimit[4] = 0.0
+        self.model.upperPositionLimit[4] = 0.0
+
         # Pink tasks
         self.ee_task = FrameTask(self.EE_FRAME, position_cost=10.0, orientation_cost=0.0)
-        self.posture_task = PostureTask(cost=1e-2)
+        self.posture_task = PostureTask(cost=1e-4)
         self.tasks = [self.ee_task, self.posture_task]
 
-        # Preferred "elbow-up" posture (MJCF deg): shoulder and elbow high
-        # so Pink biases toward concave poses where the gripper approaches from above.
+        # Preferred posture: wrist_roll=0 to prevent sideways twist
         self._elbow_up_q = np.deg2rad([0.0, 90.0, 90.0, 0.0, 0.0])
 
     def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
@@ -153,10 +156,13 @@ class IK_SO101:
             if best_error < position_tolerance:
                 break
 
+        if len(best_traj) >= max_timesteps:
+            print(f"IK did not converge: error={best_error*1000:.1f}mm, steps={len(best_traj)}/{max_timesteps}")
+            return []
+
         # Update instance state to match the best result
-        if best_traj:
-            self.q = best_traj[-1].copy()
-            self.configuration = pink.Configuration(self.model, self.data, self.q)
+        self.q = best_traj[-1].copy()
+        self.configuration = pink.Configuration(self.model, self.data, self.q)
 
         return best_traj
 

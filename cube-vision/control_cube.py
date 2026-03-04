@@ -13,9 +13,9 @@ DEG2RAD = np.pi / 180.0
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = -0.12
-IK_TARGET_OFFSET_Y_M = 0.06
-IK_TARGET_OFFSET_Z_M = 0.10
+IK_TARGET_OFFSET_X_M = 0.0
+IK_TARGET_OFFSET_Y_M = 0.0
+IK_TARGET_OFFSET_Z_M = 0.0
 
 # Single bus with head (IDs 1-2) and arm (IDs 7-12)
 bus = FeetechMotorsBus(port=BUS_PORT, motors=MOTOR_DEFS)
@@ -166,8 +166,11 @@ for grip in range(0, 101, 5):
     time.sleep(0.05)
 time.sleep(1.0)
 
-# Play IK trajectory (no gripper control)
+# Play IK trajectory — hold wrist_roll at current position (don't let it twist)
+current_wrist_roll = float(current_motor_deg[4])  # wrist_roll current reading
 goals = traj_to_goals(trajectory_rad)
+for goal in goals:
+    goal["wrist_roll"] = current_wrist_roll
 print(f"Sending {len(goals)} waypoints to motors...")
 print(f"  First goal: {goals[0]}")
 print(f"  Last goal:  {goals[-1]}")
@@ -193,7 +196,7 @@ print("Gripper closed.")
 drop_base = [
     target_base[0] + 0.20,
     target_base[1],
-    target_base[2],
+    0.05,
 ]
 print(f"\nMoving cube to drop point: [{drop_base[0]:.4f}, {drop_base[1]:.4f}, {drop_base[2]:.4f}]")
 drop_seed = trajectory_rad[-1]
@@ -206,6 +209,7 @@ print(f"Drop IK: {len(drop_traj)} steps")
 
 drop_goals = traj_to_goals(drop_traj)
 for goal in drop_goals:
+    goal["wrist_roll"] = current_wrist_roll
     bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 time.sleep(2.0)
