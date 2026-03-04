@@ -62,55 +62,12 @@ print("Opening gripper...")
 bus.sync_write("Goal_Position", {"gripper": 100.0})
 time.sleep(1.0)
 
-# Capture fresh RGBD frames from the RealSense
-capture()
-
-# Detect object by color (change color= to "red", "green", or "blue" as needed)
-centroid = detect_object(color="red")
-print(f"Camera centroid (optical frame): {centroid}")
-
-joint_values = {
-    "head_pan_joint": head_pan_deg * DEG2RAD,
-    "head_tilt_joint": head_tilt_deg * DEG2RAD,
-}
-arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
-    centroid[0], centroid[1], centroid[2], joint_values,
-)
-print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
-
 ik_solve = IK_SO101()
-
-# camera_xyz_to_base_xyz returns coordinates in Base frame (+Y is forward)
-# generate_ik accepts Base frame coordinates directly
-target_base = [
-    arm_frame_x + IK_TARGET_OFFSET_X_M,
-    arm_frame_y + IK_TARGET_OFFSET_Y_M,
-    arm_frame_z + IK_TARGET_OFFSET_Z_M,
-]
-print(
-    "IK target offsets (m): "
-    f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
-)
-print(
-    f"IK target (Base frame, offset): "
-    f"[{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]"
-)
-
-# Visualize the IK target in Base frame
-save_ik_plot(
-    base_pos=ik_solve._base_t,
-    ik_target_base=np.array(target_base),
-    camera_centroid_cam=np.array(centroid),
-)
-
 dt = 0.01
 
-# Read current arm positions to seed IK from actual pose
 ARM_JOINT_KEYS = [
     "shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll",
 ]
-current_arm_pos = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
-current_motor_deg = np.array([float(current_arm_pos[j]) for j in ARM_JOINT_KEYS])
 
 
 def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
@@ -119,24 +76,6 @@ def motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
     out[1] = 90.0 - out[1]
     out[2] = out[2] + 90.0
     return out
-
-
-current_mjcf_rad = motor_to_mjcf(current_motor_deg) * DEG2RAD
-print(f"Current arm (motor deg): {current_motor_deg}")
-print(f"Current arm (MJCF deg):  {motor_to_mjcf(current_motor_deg)}")
-
-print("Running IK solver...")
-trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
-if not trajectory_rad:
-    print("IK failed — no trajectory returned. Target may be out of reach.")
-    print(f"  Target distance from base: {np.linalg.norm(target_base):.4f} m")
-    print(f"  Base world pos: {ik_solve._base_t}")
-    bus.disconnect()
-    raise SystemExit(1)
-
-print(f"IK succeeded: {len(trajectory_rad)} steps")
-print(f"  Final joint config (rad): {trajectory_rad[-1]}")
-print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
 
 
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
@@ -165,67 +104,118 @@ def traj_to_goals(traj_rad: list[np.ndarray]) -> list[dict]:
     return goals
 
 
-# Play IK trajectory — pin wrist_roll to current position
-current_wrist_roll = float(current_motor_deg[4])
-print(f"Pinning wrist_roll at {current_wrist_roll:.2f} deg")
-goals = traj_to_goals(trajectory_rad)
-print(f"Sending {len(goals)} waypoints to motors...")
-for goal in goals:
-    goal["gripper"] = 100.0
-    goal["wrist_roll"] = current_wrist_roll
-    bus.sync_write("Goal_Position", goal)
-    time.sleep(dt)
-print(f"  First goal: {goals[0]}")
-print(f"  Last goal:  {goals[-1]}")
+# Save start position before looping
+start_arm_pos = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
+start_motor_deg = np.array([float(start_arm_pos[j]) for j in ARM_JOINT_KEYS])
 
-# Hold final position
-final_goal = goals[-1].copy()
-final_goal["gripper"] = 100.0
-final_goal["wrist_roll"] = current_wrist_roll
-bus.sync_write("Goal_Position", final_goal)
-print("Holding position for 3 seconds...")
-time.sleep(3.0)
+NUM_GRABS = 1
+for grab_i in range(NUM_GRABS):
+    print(f"\n{'='*40}")
+    print(f"  GRAB {grab_i + 1} / {NUM_GRABS}")
+    print(f"{'='*40}\n")
 
-# Close gripper
-print("Closing gripper...")
-for grip in range(100, -1, -5):
-    final_goal["gripper"] = float(grip)
+    # Capture fresh RGBD frames from the RealSense
+    capture()
+
+    # Detect object by color
+    centroid = detect_object(color="red")
+    print(f"Camera centroid (optical frame): {centroid}")
+
+    joint_values = {
+        "head_pan_joint": head_pan_deg * DEG2RAD,
+        "head_tilt_joint": head_tilt_deg * DEG2RAD,
+    }
+    arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
+        centroid[0], centroid[1], centroid[2], joint_values,
+    )
+    print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+
+    target_base = [
+        arm_frame_x + IK_TARGET_OFFSET_X_M,
+        arm_frame_y + IK_TARGET_OFFSET_Y_M,
+        arm_frame_z + IK_TARGET_OFFSET_Z_M,
+    ]
+    print(f"IK target (Base frame, offset): "
+          f"[{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
+
+    save_ik_plot(
+        base_pos=ik_solve._base_t,
+        ik_target_base=np.array(target_base),
+        camera_centroid_cam=np.array(centroid),
+    )
+
+    # Read current arm positions to seed IK
+    current_arm_pos = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
+    current_motor_deg = np.array([float(current_arm_pos[j]) for j in ARM_JOINT_KEYS])
+    current_mjcf_rad = motor_to_mjcf(current_motor_deg) * DEG2RAD
+    current_wrist_roll = float(current_motor_deg[4])
+
+    print("Running IK solver...")
+    trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0], seed_q_rad=current_mjcf_rad)
+    if not trajectory_rad:
+        print("IK failed — skipping this grab.")
+        continue
+
+    print(f"IK succeeded: {len(trajectory_rad)} steps")
+
+    # Move to target with gripper open
+    print(f"Pinning wrist_roll at {current_wrist_roll:.2f} deg")
+    goals = traj_to_goals(trajectory_rad)
+    print(f"Sending {len(goals)} waypoints to motors...")
+    for goal in goals:
+        goal["gripper"] = 100.0
+        goal["wrist_roll"] = current_wrist_roll
+        bus.sync_write("Goal_Position", goal)
+        time.sleep(dt)
+
+    # Hold final position
+    final_goal = goals[-1].copy()
+    final_goal["gripper"] = 100.0
+    final_goal["wrist_roll"] = current_wrist_roll
     bus.sync_write("Goal_Position", final_goal)
-    time.sleep(0.05)
-time.sleep(1.0)
-print("Gripper closed.")
+    print("Holding position for 3 seconds...")
+    time.sleep(3.0)
 
-# Lift cube 10cm
-lift_base = [target_base[0], target_base[1], target_base[2] + 0.10]
-print(f"\nLifting to: [{lift_base[0]:.4f}, {lift_base[1]:.4f}, {lift_base[2]:.4f}]")
-lift_traj = ik_solve.generate_ik(lift_base, [0, 0, 0], seed_q_rad=trajectory_rad[-1])
-if not lift_traj:
-    print("IK failed for lift.")
-    bus.disconnect()
-    raise SystemExit(1)
-print(f"Lift IK: {len(lift_traj)} steps")
-lift_goals = traj_to_goals(lift_traj)
-for goal in lift_goals:
-    goal["gripper"] = 0.0
-    goal["wrist_roll"] = current_wrist_roll
-    bus.sync_write("Goal_Position", goal)
-    time.sleep(dt)
-time.sleep(2.0)
+    # Close gripper
+    print("Closing gripper...")
+    for grip in range(100, -1, -5):
+        final_goal["gripper"] = float(grip)
+        bus.sync_write("Goal_Position", final_goal)
+        time.sleep(0.05)
+    time.sleep(1.0)
+    print("Gripper closed.")
 
-# Open gripper to drop
-print("Dropping cube...")
-drop_goal = lift_goals[-1].copy()
-for grip in range(0, 101, 5):
-    drop_goal["gripper"] = float(grip)
-    bus.sync_write("Goal_Position", drop_goal)
-    time.sleep(0.05)
-time.sleep(1.0)
-print("Cube dropped.")
+    # Lift cube 10cm
+    lift_base = [target_base[0], target_base[1], target_base[2] + 0.10]
+    print(f"Lifting to: [{lift_base[0]:.4f}, {lift_base[1]:.4f}, {lift_base[2]:.4f}]")
+    lift_traj = ik_solve.generate_ik(lift_base, [0, 0, 0], seed_q_rad=trajectory_rad[-1])
+    if not lift_traj:
+        print("IK failed for lift — skipping.")
+        continue
+    lift_goals = traj_to_goals(lift_traj)
+    for goal in lift_goals:
+        goal["gripper"] = 0.0
+        goal["wrist_roll"] = current_wrist_roll
+        bus.sync_write("Goal_Position", goal)
+        time.sleep(dt)
+    time.sleep(2.0)
 
-# Read back actual positions
-actual = bus.sync_read("Present_Position", ARM_JOINT_KEYS)
-print("Actual motor positions (deg):")
-for name in ARM_JOINT_KEYS:
-    print(f"  {name}: {float(actual[name]):.2f}")
-print("Done.")
+    # Open gripper to drop
+    print("Dropping cube...")
+    drop_goal = lift_goals[-1].copy()
+    for grip in range(0, 101, 5):
+        drop_goal["gripper"] = float(grip)
+        bus.sync_write("Goal_Position", drop_goal)
+        time.sleep(0.05)
+    time.sleep(1.0)
+    print("Cube dropped.")
+
+    # Return to start position
+    print("Returning to start position...")
+    start_goal = {joint: float(start_motor_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
+    start_goal["gripper"] = 100.0
+    bus.sync_write("Goal_Position", start_goal)
+    time.sleep(5.0)
+
+print(f"\nAll {NUM_GRABS} grabs complete.")
 bus.disconnect()
