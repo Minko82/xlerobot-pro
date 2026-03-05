@@ -12,6 +12,7 @@ from calibrate import (
     load_or_run_calibration,
 )
 from visualize_ik import save_ik_plot
+from visualize_color_detect import visualize as visualize_color_detect
 import time
 
 DEG2RAD = np.pi / 180.0
@@ -133,6 +134,12 @@ for cycle in range(NUM_CYCLES):
     capture()
     centroid = detect_object(color="red")
     print(f"Camera centroid (optical frame): {centroid}")
+    visualize_color_detect(
+        color="red",
+        head_pan_deg=head_pan_deg,
+        head_tilt_deg=head_tilt_deg,
+        out_name=f"color_detect_vis_cycle_{cycle + 1:02d}.png",
+    )
 
     # Transform to both arm frames
     arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(

@@ -12,6 +12,7 @@ from calibrate import (
     load_or_run_calibration,
 )
 from visualize_ik import save_ik_plot
+from visualize_color_detect import visualize as visualize_color_detect
 import time
 
 DEG2RAD = np.pi / 180.0
@@ -19,13 +20,14 @@ RAD2DEG = 180.0 / np.pi
 
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
-IK_TARGET_OFFSET_X_M = -0.12
-IK_TARGET_OFFSET_Y_M = 0.04
+IK_TARGET_OFFSET_X_M = 0.0
+IK_TARGET_OFFSET_Y_M = 0.0
 IK_TARGET_OFFSET_Z_M = 0.0
 DROP_TOWARD_MIDDLE_M = 0.10
-DROP_FORWARD_M = 0.05
+DROP_TOWARD_BASE_M = 0.07
 DROP_LOWER_M = 0.05
 POST_DROP_LIFT_M = 0.10
+DETECT_EXCLUDE_BOTTOM_FRACTION = 0.10
 
 # bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
 arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
@@ -88,8 +90,20 @@ apply_limits(arm_bus, all_arm_motors, 500, 10, 8, 0, 32)
 capture()
 
 # Detect object by color (change color= to "red", "green", or "blue" as needed)
-centroid = detect_object(color="red")
+centroid = detect_object(
+    color="red",
+    exclude_bottom_fraction=DETECT_EXCLUDE_BOTTOM_FRACTION,
+)
 print(f"Camera centroid (optical frame): {centroid}")
+visualize_color_detect(
+    color="red",
+    head_pan_deg=head_pan_deg,
+    head_tilt_deg=head_tilt_deg,
+    out_name=f"color_detect_vis_grab_{time.strftime('%Y%m%d_%H%M%S')}.png",
+    show_window=True,
+    window_ms=0,
+    exclude_bottom_fraction=DETECT_EXCLUDE_BOTTOM_FRACTION,
+)
 
 joint_values = {
     "head_pan_joint": head_pan_deg * DEG2RAD,
@@ -280,10 +294,10 @@ for grip in range(100, 5, -5):
     time.sleep(0.05)
 time.sleep(0.5)
 
-# Step 4: Lift up (adaptive retry if full 15 cm is infeasible)
+# Step 4: Lift higher before moving (adaptive retry if full 20 cm is infeasible)
 lift_target, lift_seed_rad = run_cartesian_move(
     start_target_xyz=active_target,
-    delta_xyz=[0.0, 0.0, 0.15],
+    delta_xyz=[0.0, 0.0, 0.20],
     arm=chosen_arm,
     joint_keys=active_joint_keys,
     gripper_key=active_gripper,
@@ -293,13 +307,13 @@ lift_target, lift_seed_rad = run_cartesian_move(
 )
 print("Holding after lift stage for 2 seconds...")
 
-# Step 5: Move toward the middle and farther forward for safer drop spacing
+# Step 5: Move toward the middle and toward the base for drop spacing
 # In each arm's base frame, world_Y = -base_X. Left arm is at world Y=-0.11,
 # right arm at Y=+0.11. Moving toward the middle (Y=0) means:
 #   left arm: base_X -= d   right arm: base_X += d
-# Move forward by decreasing base_Y so release is farther in front.
+# Move toward base by increasing base_Y.
 middle_dx = -DROP_TOWARD_MIDDLE_M if chosen_arm == "left" else DROP_TOWARD_MIDDLE_M
-middle_dy = -DROP_FORWARD_M
+middle_dy = DROP_TOWARD_BASE_M
 middle_target, middle_seed_rad = run_cartesian_move(
     start_target_xyz=lift_target,
     delta_xyz=[middle_dx, middle_dy, 0.0],

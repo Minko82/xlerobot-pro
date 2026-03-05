@@ -31,7 +31,7 @@ COLOR_RANGES: dict[str, list[tuple[tuple[int, int, int], tuple[int, int, int]]]]
 
 
 def detect_color(bgr: np.ndarray, color: str, min_area: int = 100,
-                 blur_ksize: int = 5) -> list[Detection]:
+                 blur_ksize: int = 5, exclude_bottom_fraction: float = 0.0) -> list[Detection]:
     """Return detections of *color* blobs, sorted largest-first."""
     key = color.lower()
     if key not in COLOR_RANGES:
@@ -47,6 +47,11 @@ def detect_color(bgr: np.ndarray, color: str, min_area: int = 100,
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    if exclude_bottom_fraction > 0.0:
+        h = mask.shape[0]
+        cutoff = int(h * (1.0 - exclude_bottom_fraction))
+        cutoff = max(0, min(h, cutoff))
+        mask[cutoff:, :] = 0
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -97,7 +102,8 @@ def detection_to_xyz(det: Detection, depth_m: np.ndarray,
 
 
 def detect_object(color: str = "red",
-                  captures_dir: str | Path | None = None) -> np.ndarray:
+                  captures_dir: str | Path | None = None,
+                  exclude_bottom_fraction: float = 0.0) -> np.ndarray:
     """High-level helper: load saved RGBD data, detect the largest blob of
     *color*, and return its 3-D centroid in the camera optical frame.
 
@@ -118,7 +124,7 @@ def detect_object(color: str = "red",
     with open(captures_dir / "intrinsic_data.json") as f:
         intrinsics = json.load(f)
 
-    detections = detect_color(bgr, color)
+    detections = detect_color(bgr, color, exclude_bottom_fraction=exclude_bottom_fraction)
     if not detections:
         raise RuntimeError(f"No {color} objects detected in image")
 
