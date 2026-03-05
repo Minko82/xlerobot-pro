@@ -20,7 +20,7 @@ RAD2DEG = 180.0 / np.pi
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
 IK_TARGET_OFFSET_X_M = -0.12
-IK_TARGET_OFFSET_Y_M = 0.0
+IK_TARGET_OFFSET_Y_M = 0.02
 IK_TARGET_OFFSET_Z_M = 0.0
 
 # bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
@@ -189,27 +189,91 @@ print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
 
 # Convert to motor goals for the active arm
 goals = traj_to_goals(trajectory_rad, active_joint_keys)
-print(f"Sending {len(goals)} waypoints to {chosen_arm} arm motors...")
+print(f"IK produced {len(goals)} waypoints for {chosen_arm} arm")
 print(f"  First goal: {goals[0]}")
 print(f"  Last goal:  {goals[-1]}")
 
-for i, goal in enumerate(goals):
+# Read starting positions before moving
+start_pos = arm_bus.sync_read("Present_Position", active_joint_keys + [active_gripper])
+start_goal = {name: float(start_pos[name]) for name in active_joint_keys + [active_gripper]}
+print(f"Saved starting position: {start_goal}")
+
+# Step 1: Open gripper
+print("Opening gripper...")
+open_goal = {name: float(start_pos[name]) for name in active_joint_keys}
+open_goal[active_gripper] = 100.0
+arm_bus.sync_write("Goal_Position", open_goal)
+time.sleep(0.5)
+
+# Step 2: Move to target with gripper open
+print(f"Sending {len(goals)} waypoints to {chosen_arm} arm motors...")
+for goal in goals:
     goal[active_gripper] = 100.0
     arm_bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-# Re-send final goal and hold so motors have time to physically reach it
+# Hold final position so motors reach it
 final_goal = goals[-1].copy()
 final_goal[active_gripper] = 100.0
 arm_bus.sync_write("Goal_Position", final_goal)
-print("Trajectory sent. Holding final position for 5 seconds...")
-time.sleep(5.0)
+print("Holding at target for 2 seconds...")
+time.sleep(2.0)
 
-# Read back actual positions to verify movement
+# Step 3: Close gripper
+print("Closing gripper...")
+close_goal = dict(final_goal)
+for grip in range(100, 5, -5):
+    close_goal[active_gripper] = float(grip)
+    arm_bus.sync_write("Goal_Position", close_goal)
+    time.sleep(0.05)
+time.sleep(0.5)
+
+# Step 4: Lift up 15 cm
+lift_target = list(active_target)
+lift_target[2] += 0.15
+print(f"Lifting 15cm to target: [{lift_target[0]:.4f}, {lift_target[1]:.4f}, {lift_target[2]:.4f}]")
+
+# Use current final config as seed for the lift IK
+lift_seed_rad = trajectory_rad[-1]
+lift_traj_rad = ik_solve.generate_ik_bimanual(
+    lift_target, arm=chosen_arm, seed_q_rad=lift_seed_rad,
+)
+if lift_traj_rad:
+    lift_goals = traj_to_goals(lift_traj_rad, active_joint_keys)
+    for goal in lift_goals:
+        goal[active_gripper] = close_goal[active_gripper]
+        arm_bus.sync_write("Goal_Position", goal)
+        time.sleep(dt)
+    lift_final = lift_goals[-1].copy()
+    lift_final[active_gripper] = close_goal[active_gripper]
+    arm_bus.sync_write("Goal_Position", lift_final)
+    print("Lifted. Holding for 2 seconds...")
+else:
+    print("Lift IK failed, holding current position for 2 seconds...")
+
+# Step 5: Wait 2 seconds
+time.sleep(2.0)
+
+# Step 6: Open gripper
+print("Opening gripper to release...")
+current_goal = (lift_goals[-1].copy() if lift_traj_rad else dict(final_goal))
+for grip in range(5, 105, 5):
+    current_goal[active_gripper] = float(grip)
+    arm_bus.sync_write("Goal_Position", current_goal)
+    time.sleep(0.05)
+time.sleep(0.5)
+
+# Step 7: Return to starting position
+print(f"Returning to starting position...")
+arm_bus.sync_write("Goal_Position", start_goal)
+print("Waiting 3 seconds for return move...")
+time.sleep(3.0)
+
+# Read back actual positions to verify
 actual = arm_bus.sync_read("Present_Position", active_joint_keys)
 print("Actual motor positions (deg):")
 for name in active_joint_keys:
-    print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
+    print(f"  {name}: {float(actual[name]):.2f}  (start: {start_goal[name]:.2f})")
 print("Done.")
 arm_bus.disconnect()
 head_bus.disconnect()
