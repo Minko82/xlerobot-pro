@@ -20,8 +20,12 @@ RAD2DEG = 180.0 / np.pi
 # Hardcoded IK target offsets in Base frame (meters).
 # Tune these to compensate end-effector placement error without changing vision transforms.
 IK_TARGET_OFFSET_X_M = -0.12
-IK_TARGET_OFFSET_Y_M = 0.02
+IK_TARGET_OFFSET_Y_M = 0.04
 IK_TARGET_OFFSET_Z_M = 0.0
+DROP_TOWARD_MIDDLE_M = 0.10
+DROP_FORWARD_M = 0.05
+DROP_LOWER_M = 0.05
+POST_DROP_LIFT_M = 0.10
 
 # bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
 arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
@@ -174,6 +178,54 @@ def traj_to_goals(traj_rad: list[np.ndarray], joint_keys: list[str]) -> list[dic
     return goals
 
 
+def run_cartesian_move(
+    start_target_xyz: list[float],
+    delta_xyz: list[float],
+    arm: str,
+    joint_keys: list[str],
+    gripper_key: str,
+    gripper_pos: float,
+    seed_q_rad: np.ndarray,
+    label: str,
+    scales: tuple[float, ...] = (1.0, 0.7, 0.5, 0.35),
+) -> tuple[list[float], np.ndarray]:
+    """Execute a Cartesian offset with adaptive retries if IK fails."""
+    for scale in scales:
+        target = [
+            float(start_target_xyz[0] + scale * delta_xyz[0]),
+            float(start_target_xyz[1] + scale * delta_xyz[1]),
+            float(start_target_xyz[2] + scale * delta_xyz[2]),
+        ]
+        print(
+            f"{label}: trying scale={scale:.2f} "
+            f"to [{target[0]:.4f}, {target[1]:.4f}, {target[2]:.4f}]"
+        )
+        traj = ik_solve.generate_ik_bimanual(
+            target,
+            arm=arm,
+            seed_q_rad=seed_q_rad,
+            position_tolerance=2e-3,
+            max_timesteps=1500,
+        )
+        if not traj:
+            continue
+
+        goals = traj_to_goals(traj, joint_keys)
+        for goal in goals:
+            goal[gripper_key] = float(gripper_pos)
+            arm_bus.sync_write("Goal_Position", goal)
+            time.sleep(dt)
+
+        final_goal = goals[-1].copy()
+        final_goal[gripper_key] = float(gripper_pos)
+        arm_bus.sync_write("Goal_Position", final_goal)
+        print(f"{label}: success with scale={scale:.2f}")
+        return target, traj[-1]
+
+    print(f"{label}: failed for all retry scales; holding current pose.")
+    return list(start_target_xyz), seed_q_rad
+
+
 print(f"Running bimanual IK solver (active arm: {chosen_arm})...")
 trajectory_rad = ik_solve.generate_ik_bimanual(active_target, arm=chosen_arm)
 if not trajectory_rad:
@@ -228,42 +280,78 @@ for grip in range(100, 5, -5):
     time.sleep(0.05)
 time.sleep(0.5)
 
-# Step 4: Lift up 15 cm
-lift_target = list(active_target)
-lift_target[2] += 0.15
-print(f"Lifting 15cm to target: [{lift_target[0]:.4f}, {lift_target[1]:.4f}, {lift_target[2]:.4f}]")
-
-# Use current final config as seed for the lift IK
-lift_seed_rad = trajectory_rad[-1]
-lift_traj_rad = ik_solve.generate_ik_bimanual(
-    lift_target, arm=chosen_arm, seed_q_rad=lift_seed_rad,
+# Step 4: Lift up (adaptive retry if full 15 cm is infeasible)
+lift_target, lift_seed_rad = run_cartesian_move(
+    start_target_xyz=active_target,
+    delta_xyz=[0.0, 0.0, 0.15],
+    arm=chosen_arm,
+    joint_keys=active_joint_keys,
+    gripper_key=active_gripper,
+    gripper_pos=close_goal[active_gripper],
+    seed_q_rad=trajectory_rad[-1],
+    label="Lift",
 )
-if lift_traj_rad:
-    lift_goals = traj_to_goals(lift_traj_rad, active_joint_keys)
-    for goal in lift_goals:
-        goal[active_gripper] = close_goal[active_gripper]
-        arm_bus.sync_write("Goal_Position", goal)
-        time.sleep(dt)
-    lift_final = lift_goals[-1].copy()
-    lift_final[active_gripper] = close_goal[active_gripper]
-    arm_bus.sync_write("Goal_Position", lift_final)
-    print("Lifted. Holding for 2 seconds...")
-else:
-    print("Lift IK failed, holding current position for 2 seconds...")
+print("Holding after lift stage for 2 seconds...")
 
-# Step 5: Wait 2 seconds
+# Step 5: Move toward the middle and farther forward for safer drop spacing
+# In each arm's base frame, world_Y = -base_X. Left arm is at world Y=-0.11,
+# right arm at Y=+0.11. Moving toward the middle (Y=0) means:
+#   left arm: base_X -= d   right arm: base_X += d
+# Move forward by decreasing base_Y so release is farther in front.
+middle_dx = -DROP_TOWARD_MIDDLE_M if chosen_arm == "left" else DROP_TOWARD_MIDDLE_M
+middle_dy = -DROP_FORWARD_M
+middle_target, middle_seed_rad = run_cartesian_move(
+    start_target_xyz=lift_target,
+    delta_xyz=[middle_dx, middle_dy, 0.0],
+    arm=chosen_arm,
+    joint_keys=active_joint_keys,
+    gripper_key=active_gripper,
+    gripper_pos=close_goal[active_gripper],
+    seed_q_rad=lift_seed_rad,
+    label="Middle move",
+)
+print("Holding after middle stage for 2 seconds...")
+
+# Step 6: Lower before release to reduce bounce
+drop_target, drop_seed_rad = run_cartesian_move(
+    start_target_xyz=middle_target,
+    delta_xyz=[0.0, 0.0, -DROP_LOWER_M],
+    arm=chosen_arm,
+    joint_keys=active_joint_keys,
+    gripper_key=active_gripper,
+    gripper_pos=close_goal[active_gripper],
+    seed_q_rad=middle_seed_rad,
+    label="Lower for drop",
+)
+
+# Step 7: Wait 2 seconds
 time.sleep(2.0)
 
-# Step 6: Open gripper
+# Step 8: Open gripper
 print("Opening gripper to release...")
-current_goal = (lift_goals[-1].copy() if lift_traj_rad else dict(final_goal))
+current_goal = dict(final_goal)
+latest_joint_goal = traj_to_goals([drop_seed_rad], active_joint_keys)[0]
+for key in active_joint_keys:
+    current_goal[key] = latest_joint_goal[key]
 for grip in range(5, 105, 5):
     current_goal[active_gripper] = float(grip)
     arm_bus.sync_write("Goal_Position", current_goal)
     time.sleep(0.05)
 time.sleep(0.5)
 
-# Step 7: Return to starting position
+# Step 9: Lift up after release so return path clears the cube
+retreat_target, retreat_seed_rad = run_cartesian_move(
+    start_target_xyz=drop_target,
+    delta_xyz=[0.0, 0.0, POST_DROP_LIFT_M],
+    arm=chosen_arm,
+    joint_keys=active_joint_keys,
+    gripper_key=active_gripper,
+    gripper_pos=current_goal[active_gripper],
+    seed_q_rad=drop_seed_rad,
+    label="Post-drop lift",
+)
+
+# Step 10: Return to starting position
 print(f"Returning to starting position...")
 arm_bus.sync_write("Goal_Position", start_goal)
 print("Waiting 3 seconds for return move...")

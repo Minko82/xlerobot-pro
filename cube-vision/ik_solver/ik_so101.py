@@ -244,7 +244,9 @@ class IK_SO101:
         # Build seed list: caller-provided seed first, then hardcoded defaults
         seeds = []
         if seed_q_rad is not None:
-            q_custom = pin.neutral(self.model)
+            # Preserve current full-body state and only reseed active arm joints.
+            # This keeps the idle arm continuous across sequential IK calls.
+            q_custom = self.configuration.q.copy()
             q_custom[active_indices] = np.asarray(seed_q_rad, dtype=float)
             q_custom = np.clip(q_custom, self.model.lowerPositionLimit, self.model.upperPositionLimit)
             seeds.append(q_custom)
@@ -265,6 +267,9 @@ class IK_SO101:
 
         if len(best_traj) >= max_timesteps:
             print(f"IK did not converge: error={best_error*1000:.1f}mm, steps={len(best_traj)}/{max_timesteps}")
+            return []
+        if best_error >= position_tolerance:
+            print(f"IK failed to reach tolerance: error={best_error*1000:.1f}mm, tol={position_tolerance*1000:.1f}mm")
             return []
 
         # Update state
