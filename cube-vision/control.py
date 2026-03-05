@@ -1,65 +1,64 @@
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
-from lerobot.motors import Motor, MotorCalibration, MotorNormMode
+from lerobot.motors import MotorCalibration, MotorNormMode
 import numpy as np
-import json
-from pathlib import Path
 from ik_solver import IK_SO101
-from point_cloud import PointCloud
-from frame_transform.frame_transform import camera_xyz_to_base_xyz
+from color_detect import detect_object
+from frame_transform.frame_transform import camera_xyz_to_base_xyz, camera_xyz_to_base2_xyz
 from realsense_capture import capture
+from calibrate import (
+    ARM_MOTOR_DEFS, HEAD_MOTOR_DEFS,
+    ARM_BUS_PORT, HEAD_BUS_PORT,
+    DEFAULT_ARM_CALIBRATION_FILE, DEFAULT_HEAD_CALIBRATION_FILE,
+    load_or_run_calibration,
+)
+from visualize_ik import save_ik_plot
 import time
 
-ARM_PORT = "/dev/ttyACM0"
-HEAD_PORT = "/dev/ttyACM1"
 DEG2RAD = np.pi / 180.0
-HEAD_CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "head.json"
+RAD2DEG = 180.0 / np.pi
 
-norm_mode_body = MotorNormMode.DEGREES
+# Hardcoded IK target offsets in Base frame (meters).
+# Tune these to compensate end-effector placement error without changing vision transforms.
+IK_TARGET_OFFSET_X_M = -0.12
+IK_TARGET_OFFSET_Y_M = 0.0
+IK_TARGET_OFFSET_Z_M = 0.0
 
-# Right arm bus (IDs 7-12) on ACM0
-arm_bus = FeetechMotorsBus(
-    port=ARM_PORT,
-    motors={
-        "shoulder_pan":  Motor(7,  "sts3215", norm_mode_body),
-        "shoulder_lift": Motor(8,  "sts3215", norm_mode_body),
-        "elbow_flex":    Motor(9,  "sts3215", norm_mode_body),
-        "wrist_flex":    Motor(10, "sts3215", norm_mode_body),
-        "wrist_roll":    Motor(11, "sts3215", norm_mode_body),
-        "gripper":       Motor(12, "sts3215", MotorNormMode.RANGE_0_100),
-    },
-)
+# bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
+arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
 arm_bus.connect()
+load_or_run_calibration(arm_bus, filepath=DEFAULT_ARM_CALIBRATION_FILE)
 
-# Head bus (IDs 1-2) on ACM1
-head_bus = FeetechMotorsBus(
-    port=HEAD_PORT,
-    motors={
-        "head_motor_1": Motor(1, "sts3215", norm_mode_body),
-        "head_motor_2": Motor(2, "sts3215", norm_mode_body),
-    },
-)
+# bus1: head motors (pan ID 2, tilt ID 1)
+head_bus = FeetechMotorsBus(port=HEAD_BUS_PORT, motors=HEAD_MOTOR_DEFS)
 head_bus.connect()
+load_or_run_calibration(head_bus, filepath=DEFAULT_HEAD_CALIBRATION_FILE)
 
-# Load head calibration so sync_read returns calibrated degrees
-if not HEAD_CALIBRATION_FILE.exists():
-    raise FileNotFoundError(
-        f"Head calibration not found: {HEAD_CALIBRATION_FILE}\n"
-        "Run calibrate_head.py first."
-    )
-with open(HEAD_CALIBRATION_FILE) as f:
-    head_calib_raw = json.load(f)
-head_bus.calibration = {
-    name: MotorCalibration(**vals) for name, vals in head_calib_raw.items()
-}
-
-# Read head positions
-head_pos = head_bus.sync_read("Present_Position", ["head_motor_1", "head_motor_2"])
-head_pan_deg = float(head_pos["head_motor_1"])
-head_tilt_deg = float(head_pos["head_motor_2"])
+# Read head positions (calibrated)
+head_pos = head_bus.sync_read("Present_Position", ["head_pan", "head_tilt"])
+head_pan_deg = float(head_pos["head_pan"])
+head_tilt_deg = float(head_pos["head_tilt"])
 print(f"Head motors (deg): pan={head_pan_deg:.2f}, tilt={head_tilt_deg:.2f}")
 
-# Apply limits to right arm
-arm_motors = list(arm_bus.motors.keys())
+# Left arm (Base) motor names
+ARM_JOINT_KEYS = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+]
+
+# Right arm (Base_2) motor names
+ARM_JOINT_KEYS_2 = [
+    "shoulder_pan_2",
+    "shoulder_lift_2",
+    "elbow_flex_2",
+    "wrist_flex_2",
+    "wrist_roll_2",
+]
+
+# All arm motors (for applying limits to both arms)
+all_arm_motors = ARM_JOINT_KEYS + ["gripper"] + ARM_JOINT_KEYS_2 + ["gripper_2"]
 
 
 def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d: int):
@@ -79,90 +78,138 @@ def apply_limits(bus, motors, torque: int, acceleration: int, p: int, i: int, d:
     bus.enable_torque(motors)
 
 
-apply_limits(arm_bus, arm_motors, 200, 10, 8, 0, 32)
+apply_limits(arm_bus, all_arm_motors, 500, 10, 8, 0, 32)
 
 # Capture fresh RGBD frames from the RealSense
 capture()
 
-# Get coordinate object from the frame of the realsense
-point_cloud = PointCloud()
-point_cloud.create_point_cloud_from_rgbd()
-point_cloud.segment_plane()
-objects = point_cloud.dbscan_objects(min_points_per_object=500)
-if not objects:
-    raise RuntimeError("No objects detected in point cloud")
-# Pick the largest cluster — the cube
-objects.sort(key=lambda o: o["num_points"])
-centroid = objects[-1]["centroid"]
+# Detect object by color (change color= to "red", "green", or "blue" as needed)
+centroid = detect_object(color="red")
 print(f"Camera centroid (optical frame): {centroid}")
 
 joint_values = {
     "head_pan_joint": head_pan_deg * DEG2RAD,
     "head_tilt_joint": head_tilt_deg * DEG2RAD,
 }
+
+# Transform to both arm frames
 arm_frame_x, arm_frame_y, arm_frame_z = camera_xyz_to_base_xyz(
     centroid[0], centroid[1], centroid[2], joint_values,
 )
-print(f"Transformed to xlerobot Base frame: [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+arm2_frame_x, arm2_frame_y, arm2_frame_z = camera_xyz_to_base2_xyz(
+    centroid[0], centroid[1], centroid[2], joint_values,
+)
+print(f"Transformed to Base frame (left arm):  [{arm_frame_x:.4f}, {arm_frame_y:.4f}, {arm_frame_z:.4f}]")
+print(f"Transformed to Base_2 frame (right arm): [{arm2_frame_x:.4f}, {arm2_frame_y:.4f}, {arm2_frame_z:.4f}]")
 
 ik_solve = IK_SO101()
 
-# camera_xyz_to_base_xyz returns coordinates in Base frame.
-# generate_ik accepts Base frame coordinates directly (it converts to world internally).
-target_base = [arm_frame_x, arm_frame_y, arm_frame_z]
-print(f"IK target (Base frame): [{target_base[0]:.4f}, {target_base[1]:.4f}, {target_base[2]:.4f}]")
+# Apply IK offsets
+target_base = [
+    arm_frame_x + IK_TARGET_OFFSET_X_M,
+    arm_frame_y + IK_TARGET_OFFSET_Y_M,
+    arm_frame_z + IK_TARGET_OFFSET_Z_M,
+]
+target_base2 = [
+    arm2_frame_x + IK_TARGET_OFFSET_X_M,
+    arm2_frame_y + IK_TARGET_OFFSET_Y_M,
+    arm2_frame_z + IK_TARGET_OFFSET_Z_M,
+]
+
+# Choose which arm to use
+chosen_arm = ik_solve.choose_arm(
+    np.array(target_base), np.array(target_base2),
+)
+
+# Select the right target for the chosen arm
+if chosen_arm == "left":
+    active_target = target_base
+    active_joint_keys = ARM_JOINT_KEYS
+    active_gripper = "gripper"
+else:
+    active_target = target_base2
+    active_joint_keys = ARM_JOINT_KEYS_2
+    active_gripper = "gripper_2"
+
+print(
+    "IK target offsets (m): "
+    f"[{IK_TARGET_OFFSET_X_M:.4f}, {IK_TARGET_OFFSET_Y_M:.4f}, {IK_TARGET_OFFSET_Z_M:.4f}]"
+)
+print(
+    f"IK target ({chosen_arm} arm, Base{'_2' if chosen_arm == 'right' else ''} frame, offset): "
+    f"[{active_target[0]:.4f}, {active_target[1]:.4f}, {active_target[2]:.4f}]"
+)
+
+# Visualize the IK target
+save_ik_plot(
+    base_pos=ik_solve._base_t if chosen_arm == "left" else ik_solve._base2_t,
+    ik_target_base=np.array(active_target),
+    camera_centroid_cam=np.array(centroid),
+)
 
 dt = 0.01
-
-trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
-# default position tolerance of 1e-3. timesteps at 500
 
 
 def mjcf_to_motor(q_deg: np.ndarray) -> np.ndarray:
     """Convert MJCF joint angles (degrees) to motor convention (degrees).
 
-    Joint order: Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L
+    Joint order: Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll
+    Same conversion applies to both arms (identical axis conventions in XML).
     """
     out = q_deg.copy()
-    out[0] = -out[0]          # Rotation_L: MJCF positive = left, motor positive = right
-    out[1] = 90.0 - out[1]   # Pitch_L -> shoulder_lift
-    out[2] = out[2] - 90.0   # Elbow_L -> elbow_flex
+    out[0] = -out[0]          # Rotation: MJCF positive = left, motor positive = right
+    out[1] = 90.0 - out[1]   # Pitch -> shoulder_lift
+    out[2] = out[2] - 90.0   # Elbow -> elbow_flex
     return out
 
 
-RAD2DEG = 180.0 / np.pi
-traj_rad_stack = np.stack(trajectory_rad)
-# Convert MJCF radians -> degrees -> motor convention
-trajectory = np.array([mjcf_to_motor(q * RAD2DEG) for q in traj_rad_stack])
-
-ARM_JOINT_KEYS = [
-    "shoulder_pan",
-    "shoulder_lift",
-    "elbow_flex",
-    "wrist_flex",
-    "wrist_roll",
-]
+def traj_to_goals(traj_rad: list[np.ndarray], joint_keys: list[str]) -> list[dict]:
+    """Convert a list of joint configs (radians) to motor goal dicts (degrees)."""
+    stack = np.stack(traj_rad)
+    traj_deg = np.array([mjcf_to_motor(q * RAD2DEG) for q in stack])
+    goals = []
+    for q_deg in traj_deg:
+        assert q_deg.shape[0] == len(joint_keys)
+        goals.append({joint: float(q_deg[i]) for i, joint in enumerate(joint_keys)})
+    return goals
 
 
-def traj_to_goal(q_deg: np.ndarray) -> dict:
-    assert q_deg.shape[0] == len(ARM_JOINT_KEYS)
-    return {joint: float(q_deg[i]) for i, joint in enumerate(ARM_JOINT_KEYS)}
+print(f"Running bimanual IK solver (active arm: {chosen_arm})...")
+trajectory_rad = ik_solve.generate_ik_bimanual(active_target, arm=chosen_arm)
+if not trajectory_rad:
+    print("IK failed — no trajectory returned. Target may be out of reach.")
+    print(f"  Target distance from base: {np.linalg.norm(active_target):.4f} m")
+    arm_bus.disconnect()
+    head_bus.disconnect()
+    raise SystemExit(1)
 
+print(f"IK succeeded: {len(trajectory_rad)} steps")
+print(f"  Final joint config (rad): {trajectory_rad[-1]}")
+print(f"  Final joint config (deg): {np.rad2deg(trajectory_rad[-1])}")
 
-goals = [traj_to_goal(q_deg) for q_deg in trajectory]
+# Convert to motor goals for the active arm
+goals = traj_to_goals(trajectory_rad, active_joint_keys)
+print(f"Sending {len(goals)} waypoints to {chosen_arm} arm motors...")
+print(f"  First goal: {goals[0]}")
+print(f"  Last goal:  {goals[-1]}")
 
-for goal in goals:
-    goal["gripper"] = 100.0
+for i, goal in enumerate(goals):
+    goal[active_gripper] = 100.0
     arm_bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-# Close gripper
-hold_goal = {k: v for k, v in goals[-1].items() if k != "gripper"}
-for grip in range(100, 5, -5):
-    goal = dict(hold_goal)
-    goal["gripper"] = float(grip)
-    arm_bus.sync_write("Goal_Position", goal)
-    time.sleep(0.05)
+# Re-send final goal and hold so motors have time to physically reach it
+final_goal = goals[-1].copy()
+final_goal[active_gripper] = 100.0
+arm_bus.sync_write("Goal_Position", final_goal)
+print("Trajectory sent. Holding final position for 5 seconds...")
+time.sleep(5.0)
 
+# Read back actual positions to verify movement
+actual = arm_bus.sync_read("Present_Position", active_joint_keys)
+print("Actual motor positions (deg):")
+for name in active_joint_keys:
+    print(f"  {name}: {float(actual[name]):.2f}  (goal: {final_goal[name]:.2f})")
+print("Done.")
 arm_bus.disconnect()
 head_bus.disconnect()

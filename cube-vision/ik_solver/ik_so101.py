@@ -72,11 +72,20 @@ class IK_SO101:
         self.q = pin.neutral(self.model)
         self.configuration = pink.Configuration(self.model, self.data, self.q)
 
+        # Lock Wrist_Roll on both arms at 0 so grippers can't turn sideways
+        for wrist_roll_joint in ["Wrist_Roll_L", "Wrist_Roll_R"]:
+            idx = self._joint_q_idx[wrist_roll_joint]
+            self.model.lowerPositionLimit[idx] = 0.0
+            self.model.upperPositionLimit[idx] = 0.0
+
         # Pink tasks: one FrameTask per EE + posture
         self.ee_left_task = FrameTask(self.EE_LEFT, position_cost=10.0, orientation_cost=0.0)
         self.ee_right_task = FrameTask(self.EE_RIGHT, position_cost=10.0, orientation_cost=0.0)
         self.posture_task = PostureTask(cost=1e-4)
         self.tasks = [self.ee_left_task, self.ee_right_task, self.posture_task]
+
+        # Preferred posture: elbow up, wrist_roll=0 to prevent sideways twist
+        self._elbow_up_q_5 = np.deg2rad([0.0, 90.0, 90.0, 0.0, 0.0])
 
     def base_to_world(self, p_base: np.ndarray) -> np.ndarray:
         """Convert a point from Base frame to the pinocchio world frame."""
@@ -149,7 +158,11 @@ class IK_SO101:
         active_task.position_cost = 10.0
         idle_task.position_cost = 100.0
 
-        self.posture_task.set_target(q_seed)
+        # Use preferred elbow-up posture for both arms
+        posture_q = pin.neutral(self.model)
+        posture_q[self._left_q_indices] = self._elbow_up_q_5
+        posture_q[self._right_q_indices] = self._elbow_up_q_5
+        self.posture_task.set_target(posture_q)
 
         trajectory: list[np.ndarray] = []
         ee_frame_id = self.model.getFrameId(active_ee_frame)
@@ -188,6 +201,7 @@ class IK_SO101:
         gripper_offset_xyz: list[float] | None = None,
         position_tolerance: float = 1e-3,
         max_timesteps: int = 1000,
+        seed_q_rad: np.ndarray | None = None,
     ) -> list[np.ndarray]:
         """Solve IK for one arm while holding the other.
 
@@ -198,6 +212,7 @@ class IK_SO101:
         gripper_offset_xyz : optional offset in Base frame
         position_tolerance : convergence threshold (meters)
         max_timesteps : max IK iterations
+        seed_q_rad : optional 5-DOF seed config (radians) for the active arm
 
         Returns
         -------
@@ -226,8 +241,17 @@ class IK_SO101:
         best_traj: list[np.ndarray] = []
         best_error = float("inf")
 
+        # Build seed list: caller-provided seed first, then hardcoded defaults
+        seeds = []
+        if seed_q_rad is not None:
+            q_custom = pin.neutral(self.model)
+            q_custom[active_indices] = np.asarray(seed_q_rad, dtype=float)
+            q_custom = np.clip(q_custom, self.model.lowerPositionLimit, self.model.upperPositionLimit)
+            seeds.append(q_custom)
         for seed_deg in self._SEED_CONFIGS_DEG:
-            q_seed = self._build_seed_q(seed_deg, arm)
+            seeds.append(self._build_seed_q(seed_deg, arm))
+
+        for q_seed in seeds:
             traj, error = self._run_ik_from_seed(
                 q_seed, active_ee, target_transform,
                 idle_ee, idle_target,
@@ -238,6 +262,10 @@ class IK_SO101:
                 best_traj = traj
             if best_error < position_tolerance:
                 break
+
+        if len(best_traj) >= max_timesteps:
+            print(f"IK did not converge: error={best_error*1000:.1f}mm, steps={len(best_traj)}/{max_timesteps}")
+            return []
 
         # Update state
         if best_traj:
@@ -255,12 +283,14 @@ class IK_SO101:
         gripper_offset_xyz: list[float],
         position_tolerance: float = 1e-3,
         max_timesteps: int = 1000,
+        seed_q_rad: np.ndarray | None = None,
     ):
         return self.generate_ik_bimanual(
             target_xyz, arm="left",
             gripper_offset_xyz=gripper_offset_xyz,
             position_tolerance=position_tolerance,
             max_timesteps=max_timesteps,
+            seed_q_rad=seed_q_rad,
         )
 
     def visualize_ik(self, trajectory: list, object_xyz):
