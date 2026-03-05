@@ -61,15 +61,13 @@ _HEAD_TILT_IDX = _model.joints[_model.getJointId("head_tilt_joint")].idx_q
 def _head_motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
     """Convert head motor degrees to MJCF joint degrees.
 
-    Pan (index 0): negated (MJCF pan axis sign is opposite motor convention)
-        then offset to align motor zero with model zero.
+    Pan (index 0): same sign as motor convention.
     Tilt (index 1): offset only (positive motor tilt = positive MJCF tilt = down).
 
     Offsets calibrated with head facing straight forward and level:
         pan motor reads ~1°, tilt motor reads ~14° at MJCF zero.
     """
     out = q_deg.copy()
-    out[0] = -out[0]
     out[1] = out[1] - 14.0
     return out
 

@@ -15,7 +15,7 @@ import time
 # Measure a point and set it here.
 # Right Arm Test: [0.0, -0.30, 0.05] Left Arm Test: [-0.15, -0.20, 0.05]
 # Due to crazy rotations, relative to camera: Y is backward, -Y is forward, X is right, -X is left, Z is up, negative Z is down. 
-TARGET_BASE = [-0.15, -0.20, 0.08]
+TARGET_BASE = [0.0, -0.20, 0.00]
 
 # Set to "left", "right", or "auto" (auto picks closer arm)
 ARM = "auto"
@@ -62,7 +62,7 @@ load_or_run_calibration(arm_bus, filepath=DEFAULT_ARM_CALIBRATION_FILE)
 arm_bus.disable_torque(all_arm_motors)
 for name in all_arm_motors:
     arm_bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
-    arm_bus.write("Torque_Limit", name, 200)
+    arm_bus.write("Torque_Limit", name, 500)
     arm_bus.write("Acceleration", name, 10)
     arm_bus.write("P_Coefficient", name, 8)
     arm_bus.write("I_Coefficient", name, 0)

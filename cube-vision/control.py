@@ -285,6 +285,15 @@ arm_bus.sync_write("Goal_Position", final_goal)
 print("Holding at target for 2 seconds...")
 time.sleep(2.0)
 
+# Debug: verify joint tracking at grasp pose (before closing gripper)
+grasp_actual = arm_bus.sync_read("Present_Position", active_joint_keys)
+print("Grasp pose actual vs goal (deg):")
+for name in active_joint_keys:
+    goal_val = float(final_goal[name])
+    actual_val = float(grasp_actual[name])
+    err = actual_val - goal_val
+    print(f"  {name}: actual={actual_val:.2f}, goal={goal_val:.2f}, err={err:+.2f}")
+
 # Step 3: Close gripper
 print("Closing gripper...")
 close_goal = dict(final_goal)
