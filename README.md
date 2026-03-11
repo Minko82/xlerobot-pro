@@ -10,6 +10,8 @@
 
 It is an evolution of the [XLeRobot](https://xlerobot.readthedocs.io/en/latest/software/getting_started/install.html) ecosystem. We have advanced the platform by integrating a stiffness-optimized structural redesign, a novel Tri-Bus power topology, and onboard GPU-accelerated autonomy, specifically tailored for accessible, high-performance research.
 
+<br>
+
 <p align="center">
   <a href="https://minko82.github.io/xlerobot-pro-website/">
     <img src="https://img.shields.io/badge/Project_Website-008080?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Project Website">
