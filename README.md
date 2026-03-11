@@ -6,7 +6,7 @@
 <br>
 
 ## Overview
-"Cutting the Cord" is an accessible bimanual mobile manipulator. Featuring an optimized 3D-printed frame, safety power envelopes, and NVIDIA Jetson Orin compute for high-end research and education.
+The XLeRobot-Pro is an accessible bimanual mobile manipulator. Featuring an optimized 3D-printed frame, safety power envelopes, and NVIDIA Jetson Orin compute for high-end research and education.
 
 It is an evolution of the [XLeRobot](https://xlerobot.readthedocs.io/en/latest/software/getting_started/install.html) ecosystem. We have advanced the platform by integrating a stiffness-optimized structural redesign, a novel Tri-Bus power topology, and onboard GPU-accelerated autonomy, specifically tailored for accessible, high-performance research.
 
@@ -35,7 +35,7 @@ It is an evolution of the [XLeRobot](https://xlerobot.readthedocs.io/en/latest/s
 ---
 
 ## Getting Started
-To get started with "Cutting the Cord," follow the instructions below:
+To get started with the XLeRobot-Pro, follow the instructions below:
 
 * **Hardware Build:** For detailed assembly instructions, parts lists, and 3D-printing guides, visit our [Project Website](https://minko82.github.io/xlerobot-pro-website/).
 * **Software Setup:** For the full software stack installation, ROS2 configuration, and autonomy setup, see the `/docs/setup.md` file in this repository.
@@ -45,7 +45,7 @@ To get started with "Cutting the Cord," follow the instructions below:
 ---
 
 ## Citation & Contributions
-We hope this platform helps accelerate your research! If you find "Cutting the Cord" useful for your work, please cite our [paper](https://arxiv.org/abs/2603.09051).
+We hope this platform helps accelerate your research! If you find "Cutting the Cord: XLeRobot-Pro" useful for your work, please cite our [paper](https://arxiv.org/abs/2603.09051).
 
 We are committed to fostering a collaborative ecosystem. If you have improved the structural design, optimized the power topology, or developed new manipulation behaviors, we strongly encourage you to submit a Pull Request. We would love to see how you evolve this foundation!
 
