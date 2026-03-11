@@ -1,4 +1,4 @@
-# Cutting the Cord: Bimanual Mobile Manipulation
+# Cutting the Cord: the XLeRobot-Pro
 <img width="894" height="455" alt="VR-Teleoperated precision during EV battery disassembly" src="https://github.com/user-attachments/assets/d8b911e5-4e95-4397-965e-9f6c243c8a38" />
 
 ***VR-Teleoperated Precision:** The platform performing screw extraction during an EV battery disassembly process.*
