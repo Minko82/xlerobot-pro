@@ -52,4 +52,4 @@ We are committed to fostering a collaborative ecosystem. If you have improved th
 ---
 
 ### Acknowledgements
-We would like to extend our sincere gratitude to the creators of the original [XLeRobot](https://xlerobot.readthedocs.io/en/latest/software/getting_started/install.html) and [LeRobot](https://huggingface.co/docs/lerobot/installation) projects. Their open-source contributions provided the essential foundation that made this evolution possible. 
+We would like to extend our sincere gratitude to the creators of the original [XLeRobot](https://xlerobot.readthedocs.io/en/latest/index.html) and [LeRobot](https://huggingface.co/docs/lerobot) projects. Their open-source contributions provided the essential foundation that made this evolution possible. 
