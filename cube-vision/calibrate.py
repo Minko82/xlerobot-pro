@@ -21,8 +21,8 @@ CALIBRATION_DIR = Path(__file__).resolve().parent / "calibration"
 DEFAULT_ARM_CALIBRATION_FILE = CALIBRATION_DIR / "arm_bus.json"
 DEFAULT_HEAD_CALIBRATION_FILE = CALIBRATION_DIR / "head_bus.json"
 
-ARM_BUS_PORT = "/dev/ttyACM0"   # bus0: both arms (IDs 1-12)
-HEAD_BUS_PORT = "/dev/ttyACM1"  # bus1: head motors (IDs 1-2)
+ARM_BUS_PORT = "/dev/ttyACM1"   # arm bus: both arms (IDs 1-12)
+HEAD_BUS_PORT = "/dev/ttyACM0"  # head bus: head motors (IDs 1-2)
 
 # Motor definitions for arm bus (bus0) — both arms
 ARM_MOTOR_DEFS = {

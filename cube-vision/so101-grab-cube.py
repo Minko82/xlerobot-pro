@@ -6,7 +6,7 @@ from pathlib import Path
 from ik_solver import IK_SO101
 import time
 
-PORT = "/dev/ttyACM0"
+PORT = "/dev/ttyACM1"
 CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "single_bus.json"
 norm_mode_body = MotorNormMode.DEGREES
 

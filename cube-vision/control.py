@@ -1,5 +1,4 @@
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
-from lerobot.motors import MotorCalibration, MotorNormMode
 import numpy as np
 from ik_solver import IK_SO101
 from color_detect import detect_object
@@ -23,18 +22,14 @@ RAD2DEG = 180.0 / np.pi
 IK_TARGET_OFFSET_X_M = 0.0
 IK_TARGET_OFFSET_Y_M = 0.0
 IK_TARGET_OFFSET_Z_M = 0.0
-DROP_TOWARD_MIDDLE_M = 0.10
-DROP_TOWARD_BASE_M = 0.07
-DROP_LOWER_M = 0.05
-POST_DROP_LIFT_M = 0.10
 DETECT_EXCLUDE_BOTTOM_FRACTION = 0.10
 
-# bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
+# Arm bus: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
 arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
 arm_bus.connect()
 load_or_run_calibration(arm_bus, filepath=DEFAULT_ARM_CALIBRATION_FILE)
 
-# bus1: head motors (pan ID 2, tilt ID 1)
+# Head bus: head motors (pan ID 2, tilt ID 1)
 head_bus = FeetechMotorsBus(port=HEAD_BUS_PORT, motors=HEAD_MOTOR_DEFS)
 head_bus.connect()
 load_or_run_calibration(head_bus, filepath=DEFAULT_HEAD_CALIBRATION_FILE)
@@ -143,11 +138,9 @@ chosen_arm = ik_solve.choose_arm(
 if chosen_arm == "left":
     active_target = target_base
     active_joint_keys = ARM_JOINT_KEYS
-    active_gripper = "gripper"
 else:
     active_target = target_base2
     active_joint_keys = ARM_JOINT_KEYS_2
-    active_gripper = "gripper_2"
 
 print(
     "IK target offsets (m): "
@@ -192,54 +185,6 @@ def traj_to_goals(traj_rad: list[np.ndarray], joint_keys: list[str]) -> list[dic
     return goals
 
 
-def run_cartesian_move(
-    start_target_xyz: list[float],
-    delta_xyz: list[float],
-    arm: str,
-    joint_keys: list[str],
-    gripper_key: str,
-    gripper_pos: float,
-    seed_q_rad: np.ndarray,
-    label: str,
-    scales: tuple[float, ...] = (1.0, 0.7, 0.5, 0.35),
-) -> tuple[list[float], np.ndarray]:
-    """Execute a Cartesian offset with adaptive retries if IK fails."""
-    for scale in scales:
-        target = [
-            float(start_target_xyz[0] + scale * delta_xyz[0]),
-            float(start_target_xyz[1] + scale * delta_xyz[1]),
-            float(start_target_xyz[2] + scale * delta_xyz[2]),
-        ]
-        print(
-            f"{label}: trying scale={scale:.2f} "
-            f"to [{target[0]:.4f}, {target[1]:.4f}, {target[2]:.4f}]"
-        )
-        traj = ik_solve.generate_ik_bimanual(
-            target,
-            arm=arm,
-            seed_q_rad=seed_q_rad,
-            position_tolerance=2e-3,
-            max_timesteps=1500,
-        )
-        if not traj:
-            continue
-
-        goals = traj_to_goals(traj, joint_keys)
-        for goal in goals:
-            goal[gripper_key] = float(gripper_pos)
-            arm_bus.sync_write("Goal_Position", goal)
-            time.sleep(dt)
-
-        final_goal = goals[-1].copy()
-        final_goal[gripper_key] = float(gripper_pos)
-        arm_bus.sync_write("Goal_Position", final_goal)
-        print(f"{label}: success with scale={scale:.2f}")
-        return target, traj[-1]
-
-    print(f"{label}: failed for all retry scales; holding current pose.")
-    return list(start_target_xyz), seed_q_rad
-
-
 print(f"Running bimanual IK solver (active arm: {chosen_arm})...")
 trajectory_rad = ik_solve.generate_ik_bimanual(active_target, arm=chosen_arm)
 if not trajectory_rad:
@@ -259,132 +204,24 @@ print(f"IK produced {len(goals)} waypoints for {chosen_arm} arm")
 print(f"  First goal: {goals[0]}")
 print(f"  Last goal:  {goals[-1]}")
 
-# Read starting positions before moving
-start_pos = arm_bus.sync_read("Present_Position", active_joint_keys + [active_gripper])
-start_goal = {name: float(start_pos[name]) for name in active_joint_keys + [active_gripper]}
-print(f"Saved starting position: {start_goal}")
-
-# Step 1: Open gripper
-print("Opening gripper...")
-open_goal = {name: float(start_pos[name]) for name in active_joint_keys}
-open_goal[active_gripper] = 100.0
-arm_bus.sync_write("Goal_Position", open_goal)
-time.sleep(0.5)
-
-# Step 2: Move to target with gripper open
 print(f"Sending {len(goals)} waypoints to {chosen_arm} arm motors...")
 for goal in goals:
-    goal[active_gripper] = 100.0
     arm_bus.sync_write("Goal_Position", goal)
     time.sleep(dt)
 
-# Hold final position so motors reach it
 final_goal = goals[-1].copy()
-final_goal[active_gripper] = 100.0
 arm_bus.sync_write("Goal_Position", final_goal)
 print("Holding at target for 2 seconds...")
 time.sleep(2.0)
 
-# Debug: verify joint tracking at grasp pose (before closing gripper)
-grasp_actual = arm_bus.sync_read("Present_Position", active_joint_keys)
-print("Grasp pose actual vs goal (deg):")
+# Read back actual positions to verify where the end-effector-driving joints ended up.
+actual = arm_bus.sync_read("Present_Position", active_joint_keys)
+print("Final arm pose actual vs goal (deg):")
 for name in active_joint_keys:
     goal_val = float(final_goal[name])
-    actual_val = float(grasp_actual[name])
+    actual_val = float(actual[name])
     err = actual_val - goal_val
     print(f"  {name}: actual={actual_val:.2f}, goal={goal_val:.2f}, err={err:+.2f}")
-
-# Step 3: Close gripper
-print("Closing gripper...")
-close_goal = dict(final_goal)
-for grip in range(100, 5, -5):
-    close_goal[active_gripper] = float(grip)
-    arm_bus.sync_write("Goal_Position", close_goal)
-    time.sleep(0.05)
-time.sleep(0.5)
-
-# Step 4: Lift higher before moving (adaptive retry if full 20 cm is infeasible)
-lift_target, lift_seed_rad = run_cartesian_move(
-    start_target_xyz=active_target,
-    delta_xyz=[0.0, 0.0, 0.20],
-    arm=chosen_arm,
-    joint_keys=active_joint_keys,
-    gripper_key=active_gripper,
-    gripper_pos=close_goal[active_gripper],
-    seed_q_rad=trajectory_rad[-1],
-    label="Lift",
-)
-print("Holding after lift stage for 2 seconds...")
-
-# Step 5: Move toward the middle and toward the base for drop spacing
-# In each arm's base frame, world_Y = -base_X. Left arm is at world Y=-0.11,
-# right arm at Y=+0.11. Moving toward the middle (Y=0) means:
-#   left arm: base_X -= d   right arm: base_X += d
-# Move toward base by increasing base_Y.
-middle_dx = -DROP_TOWARD_MIDDLE_M if chosen_arm == "left" else DROP_TOWARD_MIDDLE_M
-middle_dy = DROP_TOWARD_BASE_M
-middle_target, middle_seed_rad = run_cartesian_move(
-    start_target_xyz=lift_target,
-    delta_xyz=[middle_dx, middle_dy, 0.0],
-    arm=chosen_arm,
-    joint_keys=active_joint_keys,
-    gripper_key=active_gripper,
-    gripper_pos=close_goal[active_gripper],
-    seed_q_rad=lift_seed_rad,
-    label="Middle move",
-)
-print("Holding after middle stage for 2 seconds...")
-
-# Step 6: Lower before release to reduce bounce
-drop_target, drop_seed_rad = run_cartesian_move(
-    start_target_xyz=middle_target,
-    delta_xyz=[0.0, 0.0, -DROP_LOWER_M],
-    arm=chosen_arm,
-    joint_keys=active_joint_keys,
-    gripper_key=active_gripper,
-    gripper_pos=close_goal[active_gripper],
-    seed_q_rad=middle_seed_rad,
-    label="Lower for drop",
-)
-
-# Step 7: Wait 2 seconds
-time.sleep(2.0)
-
-# Step 8: Open gripper
-print("Opening gripper to release...")
-current_goal = dict(final_goal)
-latest_joint_goal = traj_to_goals([drop_seed_rad], active_joint_keys)[0]
-for key in active_joint_keys:
-    current_goal[key] = latest_joint_goal[key]
-for grip in range(5, 105, 5):
-    current_goal[active_gripper] = float(grip)
-    arm_bus.sync_write("Goal_Position", current_goal)
-    time.sleep(0.05)
-time.sleep(0.5)
-
-# Step 9: Lift up after release so return path clears the cube
-retreat_target, retreat_seed_rad = run_cartesian_move(
-    start_target_xyz=drop_target,
-    delta_xyz=[0.0, 0.0, POST_DROP_LIFT_M],
-    arm=chosen_arm,
-    joint_keys=active_joint_keys,
-    gripper_key=active_gripper,
-    gripper_pos=current_goal[active_gripper],
-    seed_q_rad=drop_seed_rad,
-    label="Post-drop lift",
-)
-
-# Step 10: Return to starting position
-print(f"Returning to starting position...")
-arm_bus.sync_write("Goal_Position", start_goal)
-print("Waiting 3 seconds for return move...")
-time.sleep(3.0)
-
-# Read back actual positions to verify
-actual = arm_bus.sync_read("Present_Position", active_joint_keys)
-print("Actual motor positions (deg):")
-for name in active_joint_keys:
-    print(f"  {name}: {float(actual[name]):.2f}  (start: {start_goal[name]:.2f})")
 print("Done.")
 arm_bus.disconnect()
 head_bus.disconnect()

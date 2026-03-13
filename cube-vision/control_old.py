@@ -9,14 +9,14 @@ from frame_transform.frame_transform import camera_xyz_to_base_xyz
 from realsense_capture import capture
 import time
 
-ARM_PORT = "/dev/ttyACM0"
-HEAD_PORT = "/dev/ttyACM1"
+ARM_PORT = "/dev/ttyACM1"
+HEAD_PORT = "/dev/ttyACM0"
 DEG2RAD = np.pi / 180.0
 HEAD_CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "head.json"
 
 norm_mode_body = MotorNormMode.DEGREES
 
-# Right arm bus (IDs 7-12) on ACM0
+# Right arm bus (IDs 7-12) on ACM1
 arm_bus = FeetechMotorsBus(
     port=ARM_PORT,
     motors={
@@ -30,7 +30,7 @@ arm_bus = FeetechMotorsBus(
 )
 arm_bus.connect()
 
-# Head bus (IDs 1-2) on ACM1
+# Head bus (IDs 1-2) on ACM0
 head_bus = FeetechMotorsBus(
     port=HEAD_PORT,
     motors={

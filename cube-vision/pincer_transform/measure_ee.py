@@ -12,7 +12,7 @@ from lerobot.robots.xlerobot.config_xlerobot import XLerobotConfig
 from pincer_transform.constants import ARM_MOTORS
 from pincer_transform.model import build_arm_model, motor_to_pin_q
 
-PORT = "/dev/ttyACM0"
+PORT = "/dev/ttyACM1"
 
 
 def read_q(bus, names: list[str]) -> np.ndarray:

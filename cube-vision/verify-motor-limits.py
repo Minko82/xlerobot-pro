@@ -1,7 +1,7 @@
 from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
 
 # Connect to robot
-config = SO100FollowerConfig(port="/dev/ttyACM0", use_degrees=True)
+config = SO100FollowerConfig(port="/dev/ttyACM1", use_degrees=True)
 robot = SO100Follower(config)
 robot.connect()
 

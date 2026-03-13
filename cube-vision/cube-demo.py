@@ -26,12 +26,12 @@ IK_TARGET_OFFSET_Z_M = 0.0
 # Number of grab-lift-drop cycles
 NUM_CYCLES = 3
 
-# bus0: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
+# Arm bus: both arms (IDs 1-6 Base_2, IDs 7-12 Base)
 arm_bus = FeetechMotorsBus(port=ARM_BUS_PORT, motors=ARM_MOTOR_DEFS)
 arm_bus.connect()
 load_or_run_calibration(arm_bus, filepath=DEFAULT_ARM_CALIBRATION_FILE)
 
-# bus1: head motors (pan ID 2, tilt ID 1)
+# Head bus: head motors (pan ID 2, tilt ID 1)
 head_bus = FeetechMotorsBus(port=HEAD_BUS_PORT, motors=HEAD_MOTOR_DEFS)
 head_bus.connect()
 load_or_run_calibration(head_bus, filepath=DEFAULT_HEAD_CALIBRATION_FILE)
