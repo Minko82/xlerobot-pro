@@ -219,13 +219,13 @@ def test_ik_convergence():
 
     # Test targets in Base frame
     targets = [
-        ("Forward 20cm",        [0.0, -0.20, 0.05]),
-        ("Forward 25cm",        [0.0, -0.25, 0.05]),
-        ("Forward+left",        [0.05, -0.20, 0.05]),
-        ("Forward+right",       [-0.05, -0.20, 0.05]),
-        ("Forward+up",          [0.0, -0.15, 0.15]),
-        ("Forward+down",        [0.0, -0.20, -0.05]),
-        ("Near table surface",  [0.0, -0.20, 0.00]),
+        ("Forward 20cm",        [0.20, 0.00, 0.05]),
+        ("Forward 25cm",        [0.25, 0.00, 0.05]),
+        ("Forward+left",        [0.20, -0.05, 0.05]),
+        ("Forward+right",       [0.20, 0.05, 0.05]),
+        ("Forward+up",          [0.15, 0.00, 0.15]),
+        ("Forward+down",        [0.20, 0.00, -0.05]),
+        ("Near table surface",  [0.20, 0.00, 0.00]),
     ]
 
     for name, target in targets:
@@ -252,13 +252,13 @@ def test_ik_convergence():
 
     # Test unreachable target (should return trajectory but not converge, or empty)
     ik_far = IK_SO101()
-    traj_far = ik_far.generate_ik(target_xyz=[0.0, -1.0, 0.0], gripper_offset_xyz=[0, 0, 0])
+    traj_far = ik_far.generate_ik(target_xyz=[1.0, 0.0, 0.0], gripper_offset_xyz=[0, 0, 0])
     if len(traj_far) > 0:
         final_q = traj_far[-1]
         pin.forwardKinematics(ik_far.model, ik_far.data, final_q)
         pin.updateFramePlacements(ik_far.model, ik_far.data)
         ee_world = ik_far.data.oMf[ik_far.model.getFrameId("Fixed_Jaw")].translation.copy()
-        target_world = ik_far.base_to_world(np.array([0.0, -1.0, 0.0]))
+        target_world = ik_far.base_to_world(np.array([1.0, 0.0, 0.0]))
         error = np.linalg.norm(ee_world - target_world)
         check("IK unreachable target doesn't claim success", error > 0.1,
               f"error={error*1000:.1f}mm (should be large)")
@@ -275,7 +275,7 @@ def test_ik_determinism():
 
     from ik_solver import IK_SO101
 
-    target = [0.0, -0.20, 0.05]
+    target = [0.20, 0.00, 0.05]
 
     # Run same target twice on same instance
     ik = IK_SO101()
@@ -360,7 +360,7 @@ def test_motor_mapping():
     # Verify motor angles are in a sane range for typical IK outputs
     from ik_solver import IK_SO101
     ik = IK_SO101()
-    traj = ik.generate_ik([0.0, -0.20, 0.05], [0, 0, 0])
+    traj = ik.generate_ik([0.20, 0.00, 0.05], [0, 0, 0])
     if len(traj) > 0:
         final_rad = traj[-1]
         final_deg = final_rad * RAD2DEG

@@ -85,11 +85,13 @@ print("\n" + "=" * 60)
 print("INTERPRETATION GUIDE")
 print("=" * 60)
 print("""
-Robot faces -X world. Standing BEHIND the robot, looking forward:
-  Robot RIGHT = -Y world
-  Robot LEFT  = +Y world
+Base frame is now canonical:
+  +X = forward
+  +Y = right
+  +Z = up
 
-Check: when optical point moves RIGHT (+X optical),
-which Base axis changes and in which direction?
-That tells you if left/right mapping is correct.
+Check:
+  optical +Z should increase Base X
+  optical +X should increase Base Y
+  optical +Y should decrease Base Z
 """)

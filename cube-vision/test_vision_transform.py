@@ -81,7 +81,7 @@ def run_test(color: str, ground_truth: np.ndarray | None, skip_capture: bool):
     if ground_truth is None:
         print(
             "\n>>> Enter the tape-measured position in the Base frame (meters)."
-            "\n    Base convention: +X = left, -Y = forward, +Z = up"
+            "\n    Base convention: +X = forward, +Y = right, +Z = up"
             "\n    (relative to the arm base mounting point)"
         )
         raw = input("    x y z: ").strip().split()

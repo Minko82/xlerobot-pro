@@ -1,6 +1,19 @@
-"""Camera-to-arm-base frame transform using pinocchio FK with xlerobot.xml.
+"""Camera-to-arm-base transforms using explicit canonical frames.
 
-The model is loaded once at import time and reused for every query.
+Canonical robot-frame convention throughout this module:
+  X = forward
+  Y = right
+  Z = up
+
+Input camera detections are still assumed to be in the RealSense optical frame:
+  X = right
+  Y = down
+  Z = forward
+
+The XML now exposes canonical arm-base frames directly, while the physical arm
+mounting remains unchanged under nested bodies. The transform path is therefore:
+
+  optical point -> head_camera_link -> world -> Base / Base_2
 """
 
 from __future__ import annotations
@@ -23,30 +36,17 @@ _data = _model.createData()
 # Frame IDs (resolved once)
 _BASE_FRAME_ID = _model.getFrameId("Base")
 _BASE_2_FRAME_ID = _model.getFrameId("Base_2")
-# NOTE: "head_camera_rgb_frame" has an optical-frame euler that makes its Z axis
-# align with the tilt rotation axis (Y), so tilt has no effect on its orientation
-# in pinocchio. Instead we use "head_camera_link" (which tilts correctly) and
-# apply the optical frame rotation manually.
 _CAMERA_LINK_FRAME_ID = _model.getFrameId("head_camera_link")
 
-# Rotation from camera_link frame to optical frame.
-# camera_link axes at neutral: X = forward (-X world), Y = left (-Y world), Z = up (+Z world)
-# Optical convention: Z = forward, X = right, Y = down
-# Columns of R_link_to_optical are the optical axes expressed in link frame:
-#   col 0 (optical X = right):  -link Y  = [0, -1, 0]   (right = +Y world = -link Y)
-#   col 1 (optical Y = down):   -link Z  = [0,  0, -1]
-#   col 2 (optical Z = forward): link X  = [1,  0,  0]
-_R_LINK_TO_OPTICAL = np.array([
-    [ 0,  0, 1],
-    [1,  0, 0],
-    [ 0, -1, 0],
+# Optical -> canonical camera-link coordinates:
+#   forward = optical Z
+#   right   = optical X
+#   up      = -optical Y
+_R_CAMERA_LINK_FROM_OPTICAL = np.array([
+    [0.0, 0.0, 1.0],
+    [1.0, 0.0, 0.0],
+    [0.0, -1.0, 0.0],
 ])
-
-# No base correction needed: pinocchio FK computes the exact rigid transform
-# from camera optical frame to Base frame.  The IK solver's base_to_world()
-# uses the same pinocchio rotation, so the round-trip is exact:
-#   p_world = R_base @ (R_base^T @ (R_cam @ p + t_cam - t_base)) + t_base
-#           = R_cam @ p + t_cam
 
 # Joint indices for the head (resolved once)
 _HEAD_PAN_IDX = _model.joints[_model.getJointId("head_pan_joint")].idx_q
@@ -72,13 +72,65 @@ def _head_motor_to_mjcf(q_deg: np.ndarray) -> np.ndarray:
     return out
 
 
+def _head_joint_configuration(joint_values: Dict[str, float]) -> np.ndarray:
+    """Build a model configuration with the head joints set from motor radians."""
+    pan_motor_rad = joint_values.get("head_pan_joint", 0.0)
+    tilt_motor_rad = joint_values.get("head_tilt_joint", 0.0)
+
+    motor_deg = np.array([np.rad2deg(pan_motor_rad), np.rad2deg(tilt_motor_rad)])
+    mjcf_deg = _head_motor_to_mjcf(motor_deg)
+    q = pin.neutral(_model)
+    q[_HEAD_PAN_IDX] = np.deg2rad(mjcf_deg[0])
+    q[_HEAD_TILT_IDX] = np.deg2rad(mjcf_deg[1])
+    return q
+
+
+def _update_head_fk(joint_values: Dict[str, float]) -> None:
+    """Run FK for the current head pose."""
+    q = _head_joint_configuration(joint_values)
+    pin.forwardKinematics(_model, _data, q)
+    pin.updateFramePlacements(_model, _data)
+
+
+def _frame_transform(dst_frame_id: int, src_frame_id: int) -> np.ndarray:
+    """Return T_dst_src for two Pinocchio frames."""
+    oMdst = _data.oMf[dst_frame_id]
+    oMsrc = _data.oMf[src_frame_id]
+
+    T = np.eye(4)
+    T[:3, :3] = oMdst.rotation.T @ oMsrc.rotation
+    T[:3, 3] = oMdst.rotation.T @ (oMsrc.translation - oMdst.translation)
+    return T
+
+
+def _optical_point_to_camera_link(x: float, y: float, z: float) -> np.ndarray:
+    """Convert a RealSense optical-frame point into canonical camera-link axes."""
+    p_optical = np.array([x, y, z], dtype=float)
+    return _R_CAMERA_LINK_FROM_OPTICAL @ p_optical
+
+
+def _camera_optical_to_base(
+    x: float,
+    y: float,
+    z: float,
+    joint_values: Dict[str, float],
+    base_frame_id: int,
+) -> Tuple[float, float, float]:
+    """Transform a RealSense optical-frame point into a canonical arm-base frame."""
+    _update_head_fk(joint_values)
+    T_base_camera = _frame_transform(base_frame_id, _CAMERA_LINK_FRAME_ID)
+    p_camera = _optical_point_to_camera_link(x, y, z)
+    p_base = (T_base_camera @ np.append(p_camera, 1.0))[:3]
+    return float(p_base[0]), float(p_base[1]), float(p_base[2])
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
 def head_fk(q_urdf_rad: np.ndarray) -> np.ndarray:
-    """T_baselink_camera given 2 head joint angles in URDF radians."""
+    """Return the world pose of `head_camera_link` in canonical camera axes."""
     q = pin.neutral(_model)
     q[_HEAD_PAN_IDX] = q_urdf_rad[0]
     q[_HEAD_TILT_IDX] = q_urdf_rad[1]
@@ -87,10 +139,8 @@ def head_fk(q_urdf_rad: np.ndarray) -> np.ndarray:
     pin.updateFramePlacements(_model, _data)
 
     oMf = _data.oMf[_CAMERA_LINK_FRAME_ID]
-    # Apply optical frame rotation
-    R_optical = oMf.rotation @ _R_LINK_TO_OPTICAL
     T = np.eye(4)
-    T[:3, :3] = R_optical
+    T[:3, :3] = oMf.rotation
     T[:3, 3] = oMf.translation
     return T
 
@@ -101,46 +151,14 @@ def camera_xyz_to_base_xyz(
     z: float,
     joint_values: Dict[str, float],
 ) -> Tuple[float, float, float]:
-    """Transform (x, y, z) from camera optical frame into the arm Base frame.
+    """Transform a RealSense optical-frame point into the left arm base frame.
 
-    joint_values must include:
-      - "head_pan_joint":  head pan in radians  (motor convention, sign is flipped internally)
-      - "head_tilt_joint": head tilt in radians (motor convention)
+    Returned coordinates follow the canonical robot convention:
+      X = forward
+      Y = right
+      Z = up
     """
-    pan_motor_rad = joint_values.get("head_pan_joint", 0.0)
-    tilt_motor_rad = joint_values.get("head_tilt_joint", 0.0)
-
-    # Convert motor-convention values to MJCF convention
-    motor_deg = np.array([np.rad2deg(pan_motor_rad), np.rad2deg(tilt_motor_rad)])
-    mjcf_deg = _head_motor_to_mjcf(motor_deg)
-    q_head_mjcf_rad = np.deg2rad(mjcf_deg)
-
-    # Build full configuration with head joints set
-    q = pin.neutral(_model)
-    q[_HEAD_PAN_IDX] = q_head_mjcf_rad[0]
-    q[_HEAD_TILT_IDX] = q_head_mjcf_rad[1]
-
-    pin.forwardKinematics(_model, _data, q)
-    pin.updateFramePlacements(_model, _data)
-
-    oMbase = _data.oMf[_BASE_FRAME_ID]
-    oMcam_link = _data.oMf[_CAMERA_LINK_FRAME_ID]
-
-    # Build optical frame pose: same position as camera_link, rotated to optical convention
-    R_cam_optical = oMcam_link.rotation @ _R_LINK_TO_OPTICAL
-
-    # T_base_camera: transform points from camera optical frame to Base frame
-    R = oMbase.rotation.T @ R_cam_optical
-    t = oMbase.rotation.T @ (oMcam_link.translation - oMbase.translation)
-
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = t
-
-    p_cam = np.array([x, y, z, 1.0], dtype=float)
-    p_base = (T @ p_cam)[:3]
-
-    return float(p_base[0]), float(p_base[1]), float(p_base[2])
+    return _camera_optical_to_base(x, y, z, joint_values, _BASE_FRAME_ID)
 
 
 def camera_xyz_to_base2_xyz(
@@ -149,37 +167,11 @@ def camera_xyz_to_base2_xyz(
     z: float,
     joint_values: Dict[str, float],
 ) -> Tuple[float, float, float]:
-    """Transform (x, y, z) from camera optical frame into the Base_2 (right arm) frame.
+    """Transform a RealSense optical-frame point into the right arm base frame.
 
-    Same logic as camera_xyz_to_base_xyz but using Base_2 as the reference frame.
+    Returned coordinates follow the canonical robot convention:
+      X = forward
+      Y = right
+      Z = up
     """
-    pan_motor_rad = joint_values.get("head_pan_joint", 0.0)
-    tilt_motor_rad = joint_values.get("head_tilt_joint", 0.0)
-
-    motor_deg = np.array([np.rad2deg(pan_motor_rad), np.rad2deg(tilt_motor_rad)])
-    mjcf_deg = _head_motor_to_mjcf(motor_deg)
-    q_head_mjcf_rad = np.deg2rad(mjcf_deg)
-
-    q = pin.neutral(_model)
-    q[_HEAD_PAN_IDX] = q_head_mjcf_rad[0]
-    q[_HEAD_TILT_IDX] = q_head_mjcf_rad[1]
-
-    pin.forwardKinematics(_model, _data, q)
-    pin.updateFramePlacements(_model, _data)
-
-    oMbase2 = _data.oMf[_BASE_2_FRAME_ID]
-    oMcam_link = _data.oMf[_CAMERA_LINK_FRAME_ID]
-
-    R_cam_optical = oMcam_link.rotation @ _R_LINK_TO_OPTICAL
-
-    R = oMbase2.rotation.T @ R_cam_optical
-    t = oMbase2.rotation.T @ (oMcam_link.translation - oMbase2.translation)
-
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = t
-
-    p_cam = np.array([x, y, z, 1.0], dtype=float)
-    p_base2 = (T @ p_cam)[:3]
-
-    return float(p_base2[0]), float(p_base2[1]), float(p_base2[2])
+    return _camera_optical_to_base(x, y, z, joint_values, _BASE_2_FRAME_ID)

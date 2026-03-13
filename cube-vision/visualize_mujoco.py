@@ -287,12 +287,12 @@ def main():
         description="MuJoCo visualizer for xlerobot IK pipeline",
     )
     parser.add_argument(
-        "--cube-x", type=float, default=0.0,
-        help="Target cube X in Base frame (left/right). Default: 0.0",
+        "--cube-x", type=float, default=0.25,
+        help="Target cube X in Base frame (forward/back). Default: 0.25",
     )
     parser.add_argument(
-        "--cube-y", type=float, default=-0.25,
-        help="Target cube Y in Base frame (-Y is forward). Default: -0.20",
+        "--cube-y", type=float, default=0.0,
+        help="Target cube Y in Base frame (right/left). Default: 0.0",
     )
     parser.add_argument(
         "--cube-z", type=float, default=0.0,

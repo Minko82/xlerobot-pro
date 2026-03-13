@@ -121,7 +121,11 @@
       <geom name="back_caster" pos="0.15 0.225 -0.35" type="sphere" size="0.02" rgba="0.7 0.7 0.7 1" contype="1" conaffinity="1" condim="1" priority="1" group="3"/>
 
       <!-- First Arm -->
-      <body name="Base" pos="-0.09 -0.11 0.395" euler="0 0 -1.5708">
+      <!-- Base is the canonical arm frame used by transforms and IK:
+           X = forward, Y = right, Z = up.
+           The physical arm remains nested below with its original rotation. -->
+      <body name="Base" pos="-0.09 -0.11 0.395" euler="0 0 3.14159265">
+        <body name="Base_Physical" euler="0 0 1.5708">
         <inertial pos="0.0137179 -5.19711e-05 0.0334843" mass="0.147" fullinertia="0.000114686 0.000136117 0.000130364 -4.59787e-07 4.97151e-06 9.75275e-08"/>
         <!-- Visual meshes -->
         <geom type="mesh" mesh="Base" material="white" class="visual"/>
@@ -202,10 +206,12 @@
             </body>
           </body>
         </body>
+        </body>
       </body>
 
       <!-- Second Arm -->
-      <body name="Base_2" pos="-0.09 0.11 0.395" euler="0 0 -1.5708">
+      <body name="Base_2" pos="-0.09 0.11 0.395" euler="0 0 3.14159265">
+        <body name="Base_2_Physical" euler="0 0 1.5708">
         <inertial pos="0.0137179 -5.19711e-05 0.0334843" mass="0.147" fullinertia="0.000114686 0.000136117 0.000130364 -4.59787e-07 4.97151e-06 9.75275e-08"/>
         <!-- Visual meshes -->
         <geom type="mesh" mesh="Base" material="white" class="visual"/>
@@ -286,6 +292,7 @@
             </body>
           </body>
         </body>
+        </body>
       </body>
 
       <!-- Top base (URDF: top_base_joint origin is xyz="0 0 0.73" relative to base_link at z=0, chassis is at z=0.38, so pos should be 0.73-0.38=0.35) -->
@@ -328,7 +335,7 @@
   <contact>
     <!-- Exclude collisions between adjacent links (as specified in SRDF) -->
     <!-- First arm adjacent collisions -->
-    <exclude body1="Base" body2="Rotation_Pitch"/>
+    <exclude body1="Base_Physical" body2="Rotation_Pitch"/>
     <exclude body1="Rotation_Pitch" body2="Upper_Arm"/>
     <exclude body1="Upper_Arm" body2="Lower_Arm"/>
     <exclude body1="Lower_Arm" body2="Wrist_Pitch_Roll"/>
@@ -338,11 +345,11 @@
     <exclude body1="Rotation_Pitch" body2="Lower_Arm"/>
     <exclude body1="Rotation_Pitch" body2="Wrist_Pitch_Roll"/>
     <exclude body1="Upper_Arm" body2="Wrist_Pitch_Roll"/>
-    <exclude body1="Upper_Arm" body2="Base"/>
+    <exclude body1="Upper_Arm" body2="Base_Physical"/>
     <exclude body1="Moving_Jaw" body2="Wrist_Pitch_Roll"/>
     
     <!-- Second arm adjacent collisions -->
-    <exclude body1="Base_2" body2="Rotation_Pitch_2"/>
+    <exclude body1="Base_2_Physical" body2="Rotation_Pitch_2"/>
     <exclude body1="Rotation_Pitch_2" body2="Upper_Arm_2"/>
     <exclude body1="Upper_Arm_2" body2="Lower_Arm_2"/>
     <exclude body1="Lower_Arm_2" body2="Wrist_Pitch_Roll_2"/>
@@ -352,12 +359,12 @@
     <exclude body1="Rotation_Pitch_2" body2="Lower_Arm_2"/>
     <exclude body1="Rotation_Pitch_2" body2="Wrist_Pitch_Roll_2"/>
     <exclude body1="Upper_Arm_2" body2="Wrist_Pitch_Roll_2"/>
-    <exclude body1="Upper_Arm_2" body2="Base_2"/>
+    <exclude body1="Upper_Arm_2" body2="Base_2_Physical"/>
     <exclude body1="Moving_Jaw_2" body2="Wrist_Pitch_Roll_2"/>
     
     <!-- Disable collisions between the two arms -->
-    <exclude body1="Base" body2="Base_2"/>
-    <exclude body1="chassis" body2="Base_2"/>
+    <exclude body1="Base_Physical" body2="Base_2_Physical"/>
+    <exclude body1="chassis" body2="Base_2_Physical"/>
   </contact>
 
   <tendon>

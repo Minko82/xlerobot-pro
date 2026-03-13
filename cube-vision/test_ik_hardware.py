@@ -13,9 +13,9 @@ import time
 
 # ── Hardcoded target in Base frame (meters) ──
 # Measure a point and set it here.
-# Right Arm Test: [0.0, -0.30, 0.05] Left Arm Test: [-0.15, -0.20, 0.05]
-# Due to crazy rotations, relative to camera: Y is backward, -Y is forward, X is right, -X is left, Z is up, negative Z is down. 
-TARGET_BASE = [0.0, -0.20, 0.00]
+# Base frame convention: +X = forward, +Y = right, +Z = up.
+# Example forward reach target: [0.20, 0.00, 0.00]
+TARGET_BASE = [0.20, 0.00, 0.00]
 
 # Set to "left", "right", or "auto" (auto picks closer arm)
 ARM = "auto"

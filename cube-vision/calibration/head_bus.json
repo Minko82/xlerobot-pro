@@ -2,15 +2,15 @@
     "head_pan": {
         "id": 2,
         "drive_mode": 0,
-        "homing_offset": -1646,
-        "range_min": 849,
-        "range_max": 3476
+        "homing_offset": -1615,
+        "range_min": 803,
+        "range_max": 3445
     },
     "head_tilt": {
         "id": 1,
         "drive_mode": 0,
-        "homing_offset": 2027,
-        "range_min": 848,
-        "range_max": 2885
+        "homing_offset": 1970,
+        "range_min": 904,
+        "range_max": 2941
     }
 }

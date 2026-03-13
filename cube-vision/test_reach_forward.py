@@ -54,8 +54,8 @@ apply_limits(bus, arm_motors, 200, 10, 8, 0, 32)
 ik_solve = IK_SO101()
 
 # Target: 35cm forward from the robot base
-# Base frame: +Y is forward, -X is left, +Z is up
-target_base = [0.0, 0.35, 0.0]
+# Base frame: +X is forward, +Y is right, +Z is up
+target_base = [0.35, 0.0, 0.0]
 print(f"IK target (Base frame): {target_base}")
 
 trajectory_rad = ik_solve.generate_ik(target_base, [0, 0, 0])
