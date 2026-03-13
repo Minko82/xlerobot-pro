@@ -1,3 +1,6 @@
 Mon Mar  2 10:06:47 2026
 ERROR: could not create window
 
+Fri Mar 13 17:20:21 2026
+ERROR: could not create window
+

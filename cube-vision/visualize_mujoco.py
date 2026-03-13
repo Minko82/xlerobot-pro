@@ -122,6 +122,25 @@ def _update_target_cube(model, data, world_xyz: np.ndarray):
         data.mocap_pos[mocap_id] = world_xyz
 
 
+def _add_end_effector_marker(model, data, viewer, body_name: str = "Fixed_Jaw_tip"):
+    """Render a single sphere marker at the end effector tip."""
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+    if body_id == -1:
+        return
+
+    scene = viewer.user_scn
+    scene.ngeom = 0
+    mujoco.mjv_initGeom(
+        scene.geoms[scene.ngeom],
+        type=mujoco.mjtGeom.mjGEOM_SPHERE,
+        size=np.array([0.012, 0.0, 0.0]),
+        pos=data.xpos[body_id].copy(),
+        mat=np.eye(3).reshape(-1),
+        rgba=np.array([1.0, 0.2, 0.2, 0.9]),
+    )
+    scene.ngeom += 1
+
+
 def run_visualization(
     cube_base: list[float],
     gripper_offset: list[float],
@@ -214,17 +233,16 @@ def run_visualization(
     dt_display = max(3.0 / len(trajectory), 0.01) / speed
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
-        # -- Enable labels & frames for joints and links -----------------
-        # mjtLabel: 0=none, 1=body, 2=joint, 3=geom, 4=site …
-        # mjtFrame: 0=none, 1=body, 2=geom, 3=site, 4=world, 6=joint
-        viewer.opt.label = mujoco.mjtLabel.mjLABEL_BODY   # show body/link names
-        viewer.opt.frame = mujoco.mjtFrame.mjFRAME_BODY    # show body coord frames
+        # Keep the scene uncluttered and draw only a tip marker.
+        viewer.opt.label = mujoco.mjtLabel.mjLABEL_NONE
+        viewer.opt.frame = mujoco.mjtFrame.mjFRAME_NONE
 
         # Give the viewer a moment to initialize
         time.sleep(0.5)
 
         # Ensure target cube is placed
         _update_target_cube(model, data, target_world)
+        _add_end_effector_marker(model, data, viewer)
 
         # Loop: animate trajectory, hold 8s, reset, repeat
         loop_count = 0
@@ -239,6 +257,7 @@ def run_visualization(
                 for idx, q_val in zip(qpos_indices, q_step):
                     data.qpos[idx] = q_val
                 mujoco.mj_forward(model, data)
+                _add_end_effector_marker(model, data, viewer)
                 viewer.sync()
                 time.sleep(dt_display)
 
@@ -247,6 +266,7 @@ def run_visualization(
             while viewer.is_running() and time.time() - hold_start < 8.0:
                 _update_target_cube(model, data, target_world)
                 mujoco.mj_forward(model, data)
+                _add_end_effector_marker(model, data, viewer)
                 viewer.sync()
                 time.sleep(0.05)
 
@@ -255,6 +275,7 @@ def run_visualization(
                 for idx in qpos_indices:
                     data.qpos[idx] = 0.0
                 mujoco.mj_forward(model, data)
+                _add_end_effector_marker(model, data, viewer)
                 viewer.sync()
                 time.sleep(0.5)
 
