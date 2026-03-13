@@ -49,8 +49,8 @@ class IK_SO101:
         self._right_q_indices = np.array([self._joint_q_idx[j] for j in _RIGHT_ARM_JOINTS])
 
         # EE frame names
-        self.EE_LEFT = "Fixed_Jaw"
-        self.EE_RIGHT = "Fixed_Jaw_2"
+        self.EE_LEFT = "Fixed_Jaw_tip"
+        self.EE_RIGHT = "Fixed_Jaw_tip_2"
 
         # Precompute fixed Base and Base_2 transforms (at neutral config)
         q = pin.neutral(self.model)
