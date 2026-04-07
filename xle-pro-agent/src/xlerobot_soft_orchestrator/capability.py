@@ -292,14 +292,43 @@ def read_capability_tool(capability_id: str, **kwargs) -> dict[str, Any]:
     return read_capability(capability_id)
 
 
+# @tool
+# def run_capability_tool(
+#     capability_id: str,
+#     args: dict[str, Any] | None = None,
+#     **kwargs
+# ) -> dict[str, Any]:
+#     """Execute a capability with validated arguments."""
+#     return run_capability(capability_id, args)
+
 @tool
 def run_capability_tool(
-    capability_id: str,
-    args: dict[str, Any] | None = None,
+    capability_id: str, 
+    args: dict[str, Any] | None = None, 
     **kwargs
 ) -> dict[str, Any]:
-    """Execute a capability with validated arguments."""
-    return run_capability(capability_id, args)
+    """Execute a capability with validated arguments.
+    
+    Args:
+        capability_id: The capability ID from list_capabilities (e.g. "plan_grasp")
+        args: Dict of capability-specific arguments, e.g. {"object_label": "screw", "x": 0.12, "y": -0.05, "z": 0.30}
+    
+    Always pass capability arguments nested inside the `args` dict, not as top-level kwargs.
+    """
+
+    # 1. Start with any top-level kwargs (like 'x', 'y')
+    # 2. Extract and merge 'kwargs' if it was passed as a literal key
+    # 3. Merge 'args' (the preferred way)
+    
+    extra_kwargs = kwargs.pop("kwargs", {})  # Handle the "double wrapping"
+    merged = {**kwargs, **extra_kwargs, **(args or {})}
+    
+    # Optional: Clean up internal system keys if they persist
+    merged.pop("v__args", None) 
+    
+    return run_capability(capability_id, merged or None)
+
+
 
 
 TOOLS = [
