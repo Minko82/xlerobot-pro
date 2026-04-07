@@ -1,0 +1,13 @@
+services:
+  orchestrator-ui:
+    build: .
+    container_name: xlerobot-soft-orchestrator
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/secret/gcp-creds.json
+    volumes:
+      - ./src:/app/src
+      - ./secret/gcp-creds.json:/secret/gcp-creds.json:ro

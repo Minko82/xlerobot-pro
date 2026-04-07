@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xlerobot-soft-orchestrator"
+version = "0.1.0"
+description = "XLErobot-Pro ReAct manipulation orchestrator — LangGraph + capability registry."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "langgraph>=0.2.50",
+  "langchain-core>=0.3.0",
+  "langchain-google-vertexai>=2.0.0",
+  "langchain-ollama>=0.2.0",
+  "langsmith>=0.1.120",
+  "streamlit>=1.40.0",
+  "python-dotenv>=1.0.1",
+  "pydantic-settings>=2.6.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
