@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import operator
 from dataclasses import dataclass
-from typing import Annotated, Any, Protocol, TypedDict, AsyncGenerator
+from typing import Annotated, Any, Protocol, TypedDict, AsyncGenerator, Callable
 
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, SystemMessage
@@ -90,12 +90,13 @@ You can call tools to perform actions.
 When you need to take an action, call the appropriate tool.
 Do not output JSON. Use tool calls instead.
 
-Use capability_id "DONE" when the task is fully complete.
 The "args" field:
   - For list_capabilities: {}
   - For read_capability: {"capability_id": "<id>"}
   - For run_capability:   {"capability_id": "<id>", "args": {<capability args>}}
-  - For DONE:            {"summary": "<what was accomplished>"}
+
+When the task is complete, stop calling tools and provide a concise final
+summary in plain text describing success or failure.
 
 === SAFETY RULES ===
 - Always call get_observation before any arm movement.
@@ -106,11 +107,51 @@ The "args" field:
 
 tool_node = ToolNode(TOOLS)
 
-def should_continue(state: AgentState):
-    last = state["messages"][-1]
-    if isinstance(last, AIMessage) and last.tool_calls:
-        return "tools"
-    return "END"
+def _extract_text_content(content: Any) -> str:
+    """Normalize AI message content into plain text for final summaries."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text" and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "\n".join(p for p in parts if p).strip()
+    return ""
+
+
+def _extract_done_summary_from_tool_calls(tool_calls: list[dict[str, Any]]) -> str:
+    """Back-compat shim: if model emits run_capability(DONE), terminate gracefully."""
+    for call in tool_calls:
+        if call.get("name") != "run_capability_tool":
+            continue
+        call_args = call.get("args") or {}
+        cap_id = str(call_args.get("capability_id", "")).strip().upper()
+        if cap_id != "DONE":
+            continue
+        payload = call_args.get("args") or call_args.get("kwargs") or {}
+        if isinstance(payload, dict) and isinstance(payload.get("summary"), str):
+            return payload["summary"].strip()
+        if isinstance(call_args.get("summary"), str):
+            return call_args["summary"].strip()
+        return "Task completed."
+    return ""
+
+
+def should_continue_factory(max_iterations: int) -> Callable[[AgentState], str]:
+    def should_continue(state: AgentState) -> str:
+        if state.get("done"):
+            return "END"
+        if state.get("step", 0) >= max_iterations:
+            return "END"
+        last = state["messages"][-1]
+        if isinstance(last, AIMessage) and last.tool_calls:
+            return "tools"
+        return "END"
+
+    return should_continue
 
 # ---------------------------------------------------------------------------
 # Nodes
@@ -123,19 +164,68 @@ def reason_node(state: AgentState, llm: LLMLike, max_iterations: int) -> dict[st
     response = llm.invoke(messages)
 
     tool_calls = getattr(response, "tool_calls", [])
+
+    # Extract thinking/reasoning from the response.
+    # - Ollama (reasoning=True): lands in additional_kwargs["reasoning_content"]
+    # - Vertex structured thinking: lands as a {"type": "thinking"} block in content list
+    reasoning = ""
+    additional = getattr(response, "additional_kwargs", {}) or {}
+    if additional.get("reasoning_content"):
+        # Ollama path
+        reasoning = additional["reasoning_content"]
+    elif isinstance(response.content, list):
+        # Vertex path
+        parts: list[str] = []
+        for b in response.content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "thinking" and isinstance(b.get("thinking"), str):
+                parts.append(b["thinking"])
+            elif b.get("type") == "reasoning" and isinstance(b.get("reasoning"), str):
+                parts.append(b["reasoning"])
+        reasoning = "\n\n".join(filter(None, parts))
+
+    done_from_done_tool = _extract_done_summary_from_tool_calls(tool_calls)
+    final_response = ""
+    done = False
+
+    # If model provided a terminal summary directly (no tool calls), end cleanly.
+    if not tool_calls:
+        final_response = _extract_text_content(getattr(response, "content", ""))
+        done = True
+
+    # Backward compatibility: accept legacy DONE call and terminate without executing it.
+    if done_from_done_tool:
+        final_response = done_from_done_tool
+        done = True
+
+    # Hard stop guardrail when max iterations reached.
+    next_step = state["step"] + 1
+    if next_step >= max_iterations and not done:
+        final_response = (
+            "Stopped after reaching max iterations before a clear completion "
+            "summary was produced."
+        )
+        done = True
+
     trace_event = TraceEvent(
         step=state["step"] + 1,
         stage="reason",
         capability=tool_calls[0]["name"] if tool_calls else "final_answer",
-        reasoning=str(response.content),
+        reasoning=reasoning,
         args=tool_calls[0]["args"] if tool_calls else {},
-        result_summary=""
+        result_summary=final_response if final_response else ""
     )
 
+    # Do not forward tool-call message if it is the synthetic DONE call.
+    messages_update = [] if done_from_done_tool else [response]
+
     return {
-        "messages": [response],
+        "messages": messages_update,
         "trace": [trace_event],
-        "step": state["step"] + 1,
+        "step": next_step,
+        "done": done,
+        "final_response": final_response,
     }
 
 # ---------------------------------------------------------------------------
@@ -148,6 +238,7 @@ def get_vertex_llm(settings: Settings, model_name: str | None = None) -> ChatVer
         project=settings.vertex_project_id,
         location=settings.vertex_location,
         temperature=0,
+        include_thoughts = True,
     )
 
 def get_ollama_llm(settings: Settings, model_name: str | None = None) -> ChatOllama:
@@ -155,6 +246,7 @@ def get_ollama_llm(settings: Settings, model_name: str | None = None) -> ChatOll
         model=model_name or settings.ollama_model,
         base_url=settings.ollama_base_url,
         temperature=0,
+        reasoning=True,
     )
 
 def get_llm() -> LLMLike:
@@ -181,11 +273,10 @@ def build_graph(llm: LLMLike, max_iterations: int = 10):
     workflow.add_node("reason", lambda s: reason_node(s, llm, max_iterations))
     workflow.add_node("tools", tool_node)
     workflow.add_edge(START, "reason")
-    workflow.add_edge("reason", "tools")
     workflow.add_edge("tools", "reason")
     workflow.add_conditional_edges(
         "reason",
-        should_continue,
+        should_continue_factory(max_iterations),
         {
             "tools": "tools",
             "END": END

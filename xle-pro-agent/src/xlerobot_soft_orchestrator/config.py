@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-    max_iterations: int = 3
+    max_iterations: int = 20
 
 
 def get_settings() -> Settings:

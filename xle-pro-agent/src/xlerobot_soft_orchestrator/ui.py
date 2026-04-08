@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -37,12 +38,27 @@ def render_tool_status(step_num: int, cap_id: str, args: dict, result_summary: s
                 st.code(result_summary, language="text")
     return status
 
-# TODO: this works well for vertex models, doesn't seem to be showing up for ollama. look into this
 def render_reasoning(reasoning: str, expanded: bool = False):
     """Renders the 'Thinking' expander block."""
-    if reasoning:
+    if reasoning and reasoning.strip():
         with st.expander("💭 Thinking", expanded=expanded):
             st.markdown(reasoning)
+
+
+def extract_reasoning_from_message_content(content: object) -> str:
+    """Extract model reasoning from structured content blocks."""
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "thinking" and isinstance(block.get("thinking"), str):
+            parts.append(block["thinking"])
+        elif block_type == "reasoning" and isinstance(block.get("reasoning"), str):
+            parts.append(block["reasoning"])
+    return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 # ---------------------------------------------------------------------------
 # Page Config
@@ -91,7 +107,23 @@ async def main():
                     if node_name == "reason":
                         if "trace" in node_data:
                             event = node_data["trace"][-1]
-                            render_reasoning(event.get("reasoning"), expanded=expand_thinking)
+                            reasoning = event.get("reasoning", "")
+
+                            # Fallback: extract <think> from raw message content
+                            # (needed for providers/models that do not populate trace reasoning)
+                            if not reasoning and "messages" in node_data:
+                                for msg in node_data["messages"]:
+                                    content_obj = getattr(msg, "content", "")
+                                    reasoning = extract_reasoning_from_message_content(content_obj)
+                                    if reasoning:
+                                        break
+                                    raw = str(content_obj or "")
+                                    m = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
+                                    if m:
+                                        reasoning = m.group(1).strip()
+                                        break
+
+                            render_reasoning(reasoning, expanded=expand_thinking)
                         
                         # Also check for tool calls issued by the reasoner
                         if "messages" in node_data:
