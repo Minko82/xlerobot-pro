@@ -88,12 +88,15 @@ Before calling ANY capability you must:
 === RESPONSE FORMAT ===
 You can call tools to perform actions.
 When you need to take an action, call the appropriate tool.
+Before calling any tool, include a brief explanation of your reasoning in plain text. This must be included in the message content.
 Do not output JSON. Use tool calls instead.
 
 The "args" field:
   - For list_capabilities: {}
   - For read_capability: {"capability_id": "<id>"}
-  - For run_capability:   {"capability_id": "<id>", "args": {<capability args>}}
+  - For run_capability:   {"capability_id": "<id>", "params": {<capability args>}}
+  - If your model uses "kwargs" or "params" wrappers for tool inputs, that is
+    also accepted and will be normalized.
 
 When the task is complete, stop calling tools and provide a concise final
 summary in plain text describing success or failure.
@@ -183,7 +186,33 @@ def reason_node(state: AgentState, llm: LLMLike, max_iterations: int) -> dict[st
                 parts.append(b["thinking"])
             elif b.get("type") == "reasoning" and isinstance(b.get("reasoning"), str):
                 parts.append(b["reasoning"])
+            elif b.get("type") == "text" and isinstance(b.get("text"), str):
+                parts.append(b["text"])
         reasoning = "\n\n".join(filter(None, parts))
+    elif isinstance(response.content, str):
+        # some gemini models will simply output reasoning as invoked response content
+        reasoning = str(response.content)
+
+    # Vertex/Gemini tool-call turns can expose thought metadata/signatures
+    # without plaintext thought text. Surface a bubble anyway for visibility.
+    if not reasoning:
+        response_meta = getattr(response, "response_metadata", {}) or {}
+        usage_meta = response_meta.get("usage_metadata", {}) if isinstance(response_meta, dict) else {}
+        thoughts_tokens = usage_meta.get("thoughts_token_count") if isinstance(usage_meta, dict) else 0
+
+        usage = getattr(response, "usage_metadata", {}) or {}
+        output_details = usage.get("output_token_details", {}) if isinstance(usage, dict) else {}
+        reasoning_tokens = output_details.get("reasoning") if isinstance(output_details, dict) else 0
+
+        has_vertex_signature = bool(additional.get("__gemini_function_call_thought_signatures__"))
+        token_count = reasoning_tokens or thoughts_tokens
+        if has_vertex_signature or token_count:
+            token_note = f" ({token_count} reasoning tokens)" if token_count else ""
+            reasoning = (
+                "_Internal model thinking was used"
+                f"{token_note}, but this provider does not expose plaintext "
+                "thought content for this step._"
+            )
 
     done_from_done_tool = _extract_done_summary_from_tool_calls(tool_calls)
     final_response = ""

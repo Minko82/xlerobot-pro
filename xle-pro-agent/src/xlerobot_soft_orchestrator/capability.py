@@ -292,19 +292,11 @@ def read_capability_tool(capability_id: str, **kwargs) -> dict[str, Any]:
     return read_capability(capability_id)
 
 
-# @tool
-# def run_capability_tool(
-#     capability_id: str,
-#     args: dict[str, Any] | None = None,
-#     **kwargs
-# ) -> dict[str, Any]:
-#     """Execute a capability with validated arguments."""
-#     return run_capability(capability_id, args)
-
 @tool
 def run_capability_tool(
     capability_id: str, 
     args: dict[str, Any] | None = None, 
+    params: dict[str, Any] | None = None,
     **kwargs
 ) -> dict[str, Any]:
     """Execute a capability with validated arguments.
@@ -312,23 +304,38 @@ def run_capability_tool(
     Args:
         capability_id: The capability ID from list_capabilities (e.g. "plan_grasp")
         args: Dict of capability-specific arguments, e.g. {"object_label": "screw", "x": 0.12, "y": -0.05, "z": 0.30}
-    
-    Always pass capability arguments nested inside the `args` dict, not as top-level kwargs.
+
+    This endpoint accepts provider/tool-call variants, including:
+    - nested `args`, `kwargs`, or `params`
+    - flattened top-level capability fields
     """
 
-    # 1. Start with any top-level kwargs (like 'x', 'y')
-    # 2. Extract and merge 'kwargs' if it was passed as a literal key
-    # 3. Merge 'args' (the preferred way)
-    
-    extra_kwargs = kwargs.pop("kwargs", {})  # Handle the "double wrapping"
-    merged = {**kwargs, **extra_kwargs, **(args or {})}
-    
-    # Optional: Clean up internal system keys if they persist
-    merged.pop("v__args", None) 
-    
+    # Providers can vary in tool argument shape (args / kwargs / params / flat).
+    # Normalize by recursively unwrapping known wrapper keys into one flat dict.
+    wrapper_keys = {"args", "kwargs", "params", "parameters", "payload", "input"}
+    merged: dict[str, Any] = {}
+    queue: list[dict[str, Any]] = []
+
+    if isinstance(args, dict):
+        queue.append(dict(args))
+    if isinstance(params, dict):
+        queue.append(dict(params))
+    if kwargs:
+        queue.append(dict(kwargs))
+
+    while queue:
+        current = queue.pop(0)
+        for key, value in current.items():
+            if key in wrapper_keys and isinstance(value, dict):
+                queue.append(dict(value))
+                continue
+            merged[key] = value
+
+    # Cleanup common framework-internal keys when present.
+    merged.pop("v__args", None)
+    merged.pop("type", None)
+
     return run_capability(capability_id, merged or None)
-
-
 
 
 TOOLS = [
