@@ -2,26 +2,159 @@
 
 Three capabilities are exposed to the agent:
 
-  get_observation   — identify screws (and other objects) in the scene
-  run_pick          — execute the fine-tuned VLA policy to pick one screw
-  run_visual_qa     — post-pick camera check: did we actually grab the screw?
+  get_observation   — capture a camera frame and (eventually) locate screws
+  run_pick          — stub: execute the fine-tuned VLA policy to pick one screw
+  run_visual_qa     — stub: post-pick wrist-camera grasp check
 
-Low-level primitives (open/close gripper, send_action, move_to_home, plan_grasp)
-are intentionally NOT exposed to the agent.  They are implementation details
-owned by run_pick / run_visual_qa and will be called internally when those
-capabilities are wired to real hardware.
+get_observation is now wired to real hardware:
+  - Default: OpenCV camera (index 0, your dev-machine webcam or any USB cam)
+  - Optional: Intel RealSense D435/D435i (set USE_REALSENSE=true in .env)
 
-To add a new capability later (e.g. navigate_to), define a Capability and
-register it in REGISTRY — the agent discovers everything at runtime.
+The camera image is returned as a base64-encoded PNG under the key "frame_b64"
+so that the Streamlit UI can render it inline with st.image().
+
+YOLO detection is stubbed — when your model is ready, drop it into
+_run_detection() and the rest of the pipeline stays the same.
 """
 
 from __future__ import annotations
 
+import base64
+import io
+import logging
+import os
 import random
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import numpy as np
 from langchain_core.tools import tool
+from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Camera initialisation
+# Lazy singleton — camera is opened once on first call to get_observation,
+# not at import time, so the agent can still be imported without hardware.
+# ---------------------------------------------------------------------------
+
+_camera = None          # lerobot Camera instance
+_camera_error: str = "" # set if init failed, surfaced in capability result
+
+
+def _init_camera() -> None:
+    """Open the camera once and cache it.  Tries RealSense first if configured."""
+    global _camera, _camera_error
+
+    if _camera is not None:
+        return  # already open
+
+    use_realsense = os.getenv("USE_REALSENSE", "false").lower() in ("1", "true", "yes")
+
+    if use_realsense:
+        _init_realsense()
+    else:
+        _init_opencv()
+
+
+def _init_realsense() -> None:
+    """Attempt to open an Intel RealSense camera."""
+    global _camera, _camera_error
+    try:
+        from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
+        from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
+
+        serial = os.getenv("REALSENSE_SERIAL", "")  # leave blank to use first found
+        config = RealSenseCameraConfig(
+            serial_number_or_name=serial if serial else _find_first_realsense_serial(),
+            fps=30,
+            width=640,
+            height=480,
+        )
+        cam = RealSenseCamera(config)
+        cam.connect(warmup=True)
+        _camera = cam
+        logger.info("RealSense camera opened.")
+    except Exception as exc:
+        _camera_error = f"RealSense init failed: {exc}"
+        logger.warning(_camera_error)
+        logger.info("Falling back to OpenCV camera.")
+        _init_opencv()
+
+
+def _find_first_realsense_serial() -> str:
+    """Return the serial number of the first attached RealSense device."""
+    from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
+    cameras = RealSenseCamera.find_cameras()
+    if not cameras:
+        raise RuntimeError("No RealSense cameras found.")
+    return str(cameras[0]["id"])
+
+
+def _init_opencv() -> None:
+    """Open an OpenCV camera at the configured index."""
+    global _camera, _camera_error
+    try:
+        from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
+        from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
+
+        index = int(os.getenv("OPENCV_CAMERA_INDEX", "0"))
+        config = OpenCVCameraConfig(
+            index_or_path=index,
+            fps=30,
+            width=640,
+            height=480,
+        )
+        cam = OpenCVCamera(config)
+        cam.connect(warmup=True)
+        _camera = cam
+        logger.info(f"OpenCV camera opened at index {index}.")
+    except Exception as exc:
+        _camera_error = f"OpenCV camera init failed: {exc}"
+        logger.error(_camera_error)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _frame_to_base64(frame_rgb: np.ndarray) -> str:
+    """Encode an (H, W, 3) uint8 RGB numpy array as a base64 PNG string."""
+    img = Image.fromarray(frame_rgb.astype(np.uint8), mode="RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def _run_detection(frame_rgb: np.ndarray, target_object: str) -> list[dict[str, Any]]:
+    """
+    Object detection placeholder.
+
+    Replace the body of this function with your YOLO World inference when ready.
+    The expected return format is:
+        [{"label": str, "id": str, "x": float, "y": float, "z": float,
+          "confidence": float, "bbox_px": [x1, y1, x2, y2]}, ...]
+
+    For now we return plausible-looking stub detections so the agent can
+    exercise its reasoning loop end-to-end.
+    """
+    # --- STUB ---
+    # When you have the model:
+    #   from inference import get_model
+    #   model = get_model("yolo-world-l", api_key=os.getenv("ROBOFLOW_API_KEY"))
+    #   results = model.infer(frame_rgb, text=target_object, confidence=0.3)[0]
+    #   return [ ... parse results.predictions ... ]
+    h, w = frame_rgb.shape[:2]
+    stub_objects = [
+        {"label": target_object, "id": f"{target_object}_0",
+         "x": 0.12, "y": -0.05, "z": 0.30, "confidence": 0.93,
+         "bbox_px": [w//4, h//4, w//2, h//2]},
+        {"label": target_object, "id": f"{target_object}_1",
+         "x": 0.22, "y":  0.03, "z": 0.29, "confidence": 0.88,
+         "bbox_px": [w//2, h//3, 3*w//4, 2*h//3]},
+    ]
+    return stub_objects
 
 
 # ---------------------------------------------------------------------------
@@ -31,58 +164,78 @@ from langchain_core.tools import tool
 @dataclass
 class Capability:
     id: str
-    description: str                       # one-liner shown in list_capabilities
-    doc: str                               # full contract the agent reads before calling
+    description: str
+    doc: str
     fn: Callable[..., dict[str, Any]]
     required_args: list[str] = field(default_factory=list)
     optional_args: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
-# Stub implementations
-# Replace each fn with real hardware/policy calls when ready.
+# Capability implementations
 # ---------------------------------------------------------------------------
 
 def _get_observation(target_object: str = "screw", **kwargs: Any) -> dict[str, Any]:
-    """Stub: returns a fake scene observation with detected screws.
-
-    Real implementation will:
-      1. Capture wrist/overhead camera frame.
-      2. Run object detection / depth estimation.
-      3. Return detected objects with 3-D positions in robot-base frame.
     """
-    # Simulate a shrinking screw population across repeated calls so the
-    # agent's loop-until-done logic can be exercised in dry runs.
-    all_screws = [
-        {"label": "screw", "id": "screw_0", "x": 0.12, "y": -0.05, "z": 0.30, "confidence": 0.93},
-        {"label": "screw", "id": "screw_1", "x": 0.22, "y":  0.03, "z": 0.29, "confidence": 0.88},
-        {"label": "screw", "id": "screw_2", "x": 0.08, "y":  0.11, "z": 0.31, "confidence": 0.91},
-    ]
-    objects = [o for o in all_screws if target_object.lower() in o["label"]]
+    Capture a real camera frame, run detection (stubbed), and return results.
+
+    The returned dict includes:
+      frame_b64   — base64-encoded PNG of the captured frame (rendered by the UI)
+      detected    — list of detected objects with 3-D positions
+      camera_info — which camera backend was used
+    """
+    # Ensure camera is open
+    _init_camera()
+
+    frame_b64: str = ""
+    camera_info: str = ""
+    detected: list[dict[str, Any]] = []
+    error: str = ""
+
+    if _camera is None:
+        # Camera could not be opened — return the error so the agent knows
+        error = _camera_error or "Camera not available."
+        return {
+            "capability": "get_observation",
+            "target": target_object,
+            "detected": [],
+            "count": 0,
+            "frame_b64": "",
+            "camera_info": "none",
+            "error": error,
+            "note": "Camera unavailable. Check USB connection or set USE_REALSENSE=true.",
+        }
+
+    try:
+        frame_rgb = _camera.read()          # (H, W, 3) uint8 RGB
+        frame_b64 = _frame_to_base64(frame_rgb)
+        camera_info = type(_camera).__name__
+
+        # Run detection (stub until YOLO is wired in)
+        detected = _run_detection(frame_rgb, target_object)
+
+    except Exception as exc:
+        error = f"Frame capture failed: {exc}"
+        logger.error(error)
+
     return {
         "capability": "get_observation",
         "target": target_object,
-        "detected": objects,
-        "count": len(objects),
-        "frame_id": f"frame_{random.randint(1000, 9999)}",
-        "note": "STUB — real call will invoke camera capture + object detection model",
+        "detected": detected,
+        "count": len(detected),
+        "frame_b64": frame_b64,   # base64 PNG — rendered by ui.py
+        "camera_info": camera_info,
+        "error": error,
+        "note": (
+            "Detection results are STUB placeholders. "
+            "Wire _run_detection() to YOLO World when model is ready."
+        ),
     }
 
 
 def _run_pick(screw_id: str, x: float, y: float, z: float, **kwargs: Any) -> dict[str, Any]:
-    """Stub: executes the fine-tuned VLA pick policy for one screw.
-
-    Real implementation will:
-      1. Build a structured task prompt (e.g. "pick the screw at <pos>").
-      2. Run the ACT/VLA inference loop for up to max_steps control steps.
-      3. Each step: get observation → predict action → postprocess → send_action.
-      4. Move arm to inspection pose when the horizon is reached or the policy
-         signals completion.
-
-    Internally handles: approach, open gripper, descend, close gripper, lift.
-    None of those primitives are exposed to the agent.
-    """
-    success = random.random() > 0.25   # 75 % stub success rate
+    """Stub: execute the fine-tuned VLA pick policy for one screw."""
+    success = random.random() > 0.25
     return {
         "capability": "run_pick",
         "screw_id": screw_id,
@@ -94,17 +247,8 @@ def _run_pick(screw_id: str, x: float, y: float, z: float, **kwargs: Any) -> dic
 
 
 def _run_visual_qa(screw_id: str, **kwargs: Any) -> dict[str, Any]:
-    """Stub: post-pick camera check — did the gripper actually capture the screw?
-
-    Real implementation will:
-      1. Capture a wrist-camera frame from the inspection pose.
-      2. Run a lightweight classifier / detection model.
-      3. Return grasp_confirmed=True/False and a confidence score.
-
-    This is intentionally separate from run_pick so the agent can decide
-    whether to retry, skip, or escalate on failure.
-    """
-    grasp_confirmed = random.random() > 0.2   # 80 % stub confirmation rate
+    """Stub: post-pick wrist-camera grasp confirmation."""
+    grasp_confirmed = random.random() > 0.2
     return {
         "capability": "run_visual_qa",
         "screw_id": screw_id,
@@ -121,29 +265,34 @@ def _run_visual_qa(screw_id: str, **kwargs: Any) -> dict[str, Any]:
 REGISTRY: dict[str, Capability] = {
     "get_observation": Capability(
         id="get_observation",
-        description="Capture a camera frame and locate screws (or other objects) in 3-D space.",
+        description=(
+            "Capture a live camera frame and locate objects (screws, nuts, etc.) in the scene. "
+            "Returns a base64 image of the frame and a list of detected objects with 3-D positions."
+        ),
         doc="""
 Capability: get_observation
 ----------------------------
 Purpose:
-  Capture the current camera frame, run object detection, and return a list
-  of detected objects with their 3-D positions in the robot-base frame.
+  Capture the current camera frame and run object detection. Returns detected
+  objects with 3-D positions in the robot-base frame, plus the raw camera image.
 
 Required args:  (none)
 Optional args:
-  target_object (str, default "screw") — label filter applied to detections.
+  target_object (str, default "screw") — label filter for detection.
 
 Returns:
-  detected: list of { id, label, x, y, z, confidence }
-  count:    number of detected objects matching the filter
-  frame_id: identifier for the captured frame (useful for logging)
+  detected:     list of { id, label, x, y, z, confidence, bbox_px }
+  count:        number of detected objects
+  frame_b64:    base64-encoded PNG of the captured frame (displayed in UI)
+  camera_info:  which camera backend was used (OpenCVCamera / RealSenseCamera)
+  error:        non-empty string if something went wrong
 
-When to use:
-  - At the start of each pick cycle to find the next screw to pick.
-  - After completing all picks to confirm the workspace is clear.
-  - Do NOT call repeatedly without acting on the results.
+Notes:
+  - Detection is currently STUBBED. Positions are plausible but not real.
+  - The image IS real — it comes from your physical camera.
+  - Wire _run_detection() in capability.py to YOLO World when the model is ready.
 
-Workflow position:  START → get_observation → run_pick → run_visual_qa → (loop or done)
+Workflow:  START → get_observation → run_pick → run_visual_qa → (loop or done)
 """,
         fn=_get_observation,
         optional_args=["target_object"],
@@ -151,30 +300,24 @@ Workflow position:  START → get_observation → run_pick → run_visual_qa →
 
     "run_pick": Capability(
         id="run_pick",
-        description="Execute the fine-tuned VLA pick policy to grasp one screw.",
+        description="Execute the fine-tuned VLA pick policy to grasp one screw. (STUB)",
         doc="""
 Capability: run_pick
 ---------------------
 Purpose:
   Run the fine-tuned VLA (ACT) policy to pick the specified screw.
-  The policy handles the full pick motion internally; do not call any
-  lower-level gripper or movement primitives yourself.
 
 Required args:
-  screw_id (str)           — the "id" field from get_observation output
-  x, y, z  (float)        — screw position from get_observation (meters, base frame)
-
-Optional args:  (none)
+  screw_id (str)    — the "id" field from get_observation output
+  x, y, z  (float) — screw position from get_observation (metres, base frame)
 
 Returns:
   status:         "SUCCESS" or "FAILURE"
   failure_reason: string if FAILURE, else null
 
-After this call you MUST call run_visual_qa to verify the grasp before
-proceeding. A "SUCCESS" status from run_pick is optimistic; QA is the
-ground truth.
+After this call you MUST call run_visual_qa to verify the grasp.
 
-Workflow position:  get_observation → run_pick → run_visual_qa
+NOTE: Currently a stub. Real implementation will run the LeRobot ACT policy loop.
 """,
         fn=_run_pick,
         required_args=["screw_id", "x", "y", "z"],
@@ -182,29 +325,21 @@ Workflow position:  get_observation → run_pick → run_visual_qa
 
     "run_visual_qa": Capability(
         id="run_visual_qa",
-        description="Post-pick camera check: verify the screw was successfully grasped.",
+        description="Post-pick wrist-camera check: verify the screw was successfully grasped. (STUB)",
         doc="""
 Capability: run_visual_qa
 --------------------------
 Purpose:
-  From the current inspection pose, capture a wrist-camera frame and
-  determine whether the gripper is actually holding the screw.
+  Capture a wrist-camera frame and determine whether the gripper holds the screw.
 
 Required args:
-  screw_id (str) — the screw ID that was just picked (from get_observation)
-
-Optional args:  (none)
+  screw_id (str) — the screw ID that was just picked
 
 Returns:
-  grasp_confirmed (bool)  — true if the screw is visibly in the gripper
-  confidence      (float) — model confidence in the verdict [0, 1]
+  grasp_confirmed (bool)
+  confidence      (float) [0, 1]
 
-Decision logic (agent responsibility):
-  - grasp_confirmed=True  → screw removed; call get_observation for next screw
-  - grasp_confirmed=False → pick failed; retry run_pick (up to max retries),
-                            then move on if still failing to avoid deadlock
-
-Workflow position:  run_pick → run_visual_qa → (get_observation | retry run_pick)
+NOTE: Currently a stub.
 """,
         fn=_run_visual_qa,
         required_args=["screw_id"],
@@ -213,7 +348,7 @@ Workflow position:  run_pick → run_visual_qa → (get_observation | retry run_
 
 
 # ---------------------------------------------------------------------------
-# Agent-facing interface (called by the LangGraph tool node)
+# Agent-facing interface
 # ---------------------------------------------------------------------------
 
 def list_capabilities() -> dict[str, Any]:
@@ -235,8 +370,7 @@ def read_capability(capability_id: str) -> dict[str, Any]:
     """Return the full contract/doc for one capability."""
     cap = REGISTRY.get(capability_id)
     if cap is None:
-        ids = list(REGISTRY.keys())
-        return {"error": f"Unknown capability: {capability_id!r}. Available: {ids}"}
+        return {"error": f"Unknown capability: {capability_id!r}. Available: {list(REGISTRY.keys())}"}
     return {
         "id": cap.id,
         "description": cap.description,
@@ -250,8 +384,7 @@ def run_capability(capability_id: str, args: dict[str, Any] | None = None) -> di
     """Validate args and execute a capability by id."""
     cap = REGISTRY.get(capability_id)
     if cap is None:
-        ids = list(REGISTRY.keys())
-        return {"error": f"Unknown capability: {capability_id!r}. Available: {ids}"}
+        return {"error": f"Unknown capability: {capability_id!r}. Available: {list(REGISTRY.keys())}"}
     args = args or {}
     missing = [k for k in cap.required_args if k not in args]
     if missing:
@@ -266,7 +399,7 @@ def run_capability(capability_id: str, args: dict[str, Any] | None = None) -> di
 
 
 # ---------------------------------------------------------------------------
-# LangChain tool wrappers (bound to the LangGraph tool node)
+# LangChain tool wrappers
 # ---------------------------------------------------------------------------
 
 @tool
@@ -291,28 +424,15 @@ def run_capability_tool(
     """Execute a robot capability with validated arguments.
 
     Args:
-        capability_id: ID from list_capabilities (e.g. "run_pick")
-        args: Capability-specific arguments, e.g.
-              {"screw_id": "screw_0", "x": 0.12, "y": -0.05, "z": 0.30}
-
-    Accepted shapes: nested args/params/kwargs dicts are all normalized.
+        capability_id: ID from list_capabilities (e.g. "get_observation")
+        args: Capability-specific arguments dict.
     """
-    # The LLM always passes capability args inside the `args` dict parameter.
-    # We must flatten that dict directly — it is NOT a wrapper key, it IS the payload.
-    # Additional provider-specific wrappers (params, kwargs) are also unwrapped.
     merged: dict[str, Any] = {}
-
-    # Start with the primary `args` parameter — this is the main payload.
     if isinstance(args, dict):
         merged.update(args)
-
-    # Merge `params` if provided (some providers use this instead).
     if isinstance(params, dict):
         merged.update(params)
-
-    # Merge any extra kwargs, but skip known framework-internal keys.
     skip_keys = {"v__args", "type"}
-    # If kwargs contains further nested dicts under wrapper keys, unwrap one level.
     wrapper_keys = {"kwargs", "parameters", "payload", "input"}
     for key, value in kwargs.items():
         if key in skip_keys:
