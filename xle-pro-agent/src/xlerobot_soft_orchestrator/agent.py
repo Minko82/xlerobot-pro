@@ -34,6 +34,31 @@ from langgraph.graph import END, START, StateGraph
 from .capability import TOOLS
 from .config import Settings, configure_langsmith, get_settings
 
+def _strip_frame_b64_from_tool_messages(messages: list) -> list:
+    """Remove frame_b64 from tool result messages before they re-enter the context window.
+    
+    The base64 image string can be 300k+ tokens and is only needed by the UI.
+    The agent's reasoning loop has no use for it.
+    """
+    import json
+    cleaned = []
+    for msg in messages:
+        if getattr(msg, "type", None) == "tool":
+            try:
+                payload = json.loads(msg.content)
+                if "frame_b64" in payload:
+                    payload["frame_b64"] = "<stripped_for_context_efficiency>"
+                    from langchain_core.messages import ToolMessage
+                    msg = ToolMessage(
+                        content=json.dumps(payload),
+                        tool_call_id=msg.tool_call_id,
+                        name=msg.name,
+                    )
+            except (json.JSONDecodeError, TypeError):
+                pass
+        cleaned.append(msg)
+    return cleaned
+
 
 # ---------------------------------------------------------------------------
 # Protocols & shared types
@@ -162,7 +187,9 @@ def should_continue_factory(max_iterations: int) -> Callable[[AgentState], str]:
 
 def reason_node(state: AgentState, llm: LLMLike, max_iterations: int) -> dict[str, Any]:
     system = SYSTEM_PROMPT.replace("{{MAX_ITERATIONS}}", str(max_iterations))
-    messages = [SystemMessage(content=system)] + state["messages"]
+    # Scrub frame_b64 from any tool messages before they hit the LLM context window
+    clean_messages = _strip_frame_b64_from_tool_messages(state["messages"])
+    messages = [SystemMessage(content=system)] + clean_messages
 
     response = llm.invoke(messages)
 
