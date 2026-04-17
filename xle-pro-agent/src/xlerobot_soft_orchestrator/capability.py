@@ -18,9 +18,9 @@ Camera backends (set in .env):
   REALSENSE_SERIAL=<serial>   → specific device (optional)
   OPENCV_CAMERA_INDEX=<n>     → fallback OpenCV camera index (default 0)
 
-YOLO backend (set in .env):
-  YOLO_MODEL=yoloe-26s-seg.pt → model weights (default yoloe-26s-seg.pt)
-                                 swap for your colleague's custom weights when ready
+YOLO backend:
+  Uses arpa_vision YOLO_WORLD with custom EV battery weights by default.
+  Override weight path via YOLO_MODEL= in .env if needed.
 
 VLM backend:
   Uses Gemini via the same Vertex AI credentials already configured in config.py.
@@ -205,44 +205,74 @@ def _camera_unavailable_result(capability: str, extra: dict | None = None) -> di
     return base
 
 # ---------------------------------------------------------------------------
-# YOLO — lazy singleton
+# YOLO — lazy singleton (arpa_vision YOLO_WORLD)
 # ---------------------------------------------------------------------------
+
+_ARPA_VISION_ROOT = "/home/xle/arpa_vision"
+_ARPA_VISION_WEIGHTS = "/home/xle/arpa_vision/arpa_vision/scripts/yolov8x-worldv2_best.pt"
+_EV_BATTERY_QUERIES = ["Bolt", "BusBar", "InteriorScrew", "Nut", "OrangeCover", "Screw", "Screw Hole"]
 
 _yolo_model = None
 _yolo_error: str = ""
 
+
 def _get_yolo_model():
-    """Load and cache the YOLO model, converting to TensorRT if needed."""
+    """Load and cache the arpa_vision YOLO_WORLD model for EV battery part detection."""
     global _yolo_model, _yolo_error
     if _yolo_model is not None:
         return _yolo_model, ""
     if _yolo_error:
         return None, _yolo_error
-    
+
     try:
-        from ultralytics import YOLO
-        weights = os.getenv("YOLO_MODEL", "yoloe-26s-seg.pt")
-        
-        # 1. Define the engine path (e.g., yoloe-26s-seg.engine)
-        engine_path = weights.replace(".pt", ".engine")
-        
-        # 2. If the engine doesn't exist, create it (Exporting)
-        if not os.path.exists(engine_path):
-            logger.info(f"TensorRT engine not found. Exporting {weights} to {engine_path} (FP16)...")
-            tmp_model = YOLO(weights)
-            # This is the memory-saving magic: half=True (FP16)
-            tmp_model.export(format="engine", device=0, half=True, simplify=True)
-            del tmp_model # Free PyTorch memory immediately
-        
-        # 3. Load the optimized engine
-        _yolo_model = YOLO(engine_path, task="segment")
-        logger.info(f"YOLO TensorRT model loaded: {engine_path}")
+        import sys
+        import torch
+        if _ARPA_VISION_ROOT not in sys.path:
+            sys.path.insert(0, _ARPA_VISION_ROOT)
+        from arpa_vision.scripts.BoundingBoxDetectors import YOLO_WORLD
+
+        weight_path = os.getenv("YOLO_MODEL", _ARPA_VISION_WEIGHTS)
+
+        # Jetson Orin: conda PyTorch may not be linked to JetPack's NvMap allocator.
+        # expandable_segments must be set before the first CUDA allocation.
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+        try:
+            _yolo_model = YOLO_WORLD(weight_file_path=weight_path)
+            logger.info(f"YOLO_WORLD loaded on CUDA: {weight_path}")
+        except Exception as cuda_exc:
+            logger.warning(f"CUDA load failed ({cuda_exc}); falling back to CPU.")
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            _orig = torch.cuda.is_available
+            torch.cuda.is_available = lambda: False
+            try:
+                _yolo_model = YOLO_WORLD(weight_file_path=weight_path)
+                logger.info(f"YOLO_WORLD loaded on CPU: {weight_path}")
+            finally:
+                torch.cuda.is_available = _orig
+
         return _yolo_model, ""
 
     except Exception as exc:
-        _yolo_error = f"YOLO TensorRT load/export failed: {exc}"
+        _yolo_error = f"YOLO_WORLD load failed: {exc}"
         logger.error(_yolo_error)
         return None, _yolo_error
+
+
+def _build_queries(target_object: str) -> list[str]:
+    """Map a target_object string to YOLO_WORLD query labels.
+
+    Matches case-insensitively against the EV battery class list; falls back to
+    the raw string split if no match found.  Empty string returns all classes.
+    """
+    if not target_object:
+        return _EV_BATTERY_QUERIES
+    requested = {lbl.strip().lower() for lbl in target_object.split(",") if lbl.strip()}
+    matched = [q for q in _EV_BATTERY_QUERIES if q.lower() in requested]
+    return matched if matched else [lbl.strip() for lbl in target_object.split(",") if lbl.strip()]
 
 
 def _run_yolo_detection(
@@ -250,76 +280,53 @@ def _run_yolo_detection(
     target_object: str,
     confidence_threshold: float = 0.20,
 ) -> tuple[list[dict[str, Any]], str, str]:
-    """
-    Run YOLO inference on frame_rgb.
+    """Run YOLO_WORLD inference on frame_rgb.
 
-    For open-vocabulary detection (YOLO-World), the target_object label is used
-    as the text prompt.  For standard YOLO models the label is used as a
-    post-inference filter — any detection whose class name contains
-    target_object (case-insensitive) is kept; pass target_object="" to keep all.
+    target_object is matched against EV battery classes
+    (Bolt, BusBar, InteriorScrew, Nut, OrangeCover, Screw, Screw Hole).
+    Leave empty to detect all classes.
 
     Returns (detections, annotated_frame_b64, error).
-    annotated_frame_b64 is a base64 PNG with YOLO bounding boxes drawn on it.
     """
     model, err = _get_yolo_model()
     if model is None:
         return [], "", err
 
     try:
-        import cv2
-
-        # YOLOE-26 / YOLO-World: set text prompt classes before inference.
-        # set_classes only needs calling when the target changes — safe to call every time.
-        if hasattr(model, "set_classes"):
-            labels = [lbl.strip() for lbl in target_object.split(",") if lbl.strip()]
-            model.set_classes(labels if labels else ["object"])
-        elif target_object:
-            logger.warning(
-                f"Model does not support set_classes — '{target_object}' will be "
-                "used as a post-inference label filter only. Switch to yoloe-26s-seg.pt."
-            )
-
-        results = model.predict(frame_rgb, conf=confidence_threshold, verbose=False)
+        queries = _build_queries(target_object)
+        candidates_2d = model.predict(frame_rgb, queries=queries, debug=False)
 
         detections: list[dict[str, Any]] = []
-        annotated_b64 = ""
+        h, w = frame_rgb.shape[:2]
+        annotated = frame_rgb.copy()
+        det_idx = 0
 
-        for r in results:
-            annotated_bgr = r.plot()
-            annotated_rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
-            annotated_b64 = _frame_to_base64(annotated_rgb)
-
-            # YOLOE returns masks (seg model) as well as boxes — use boxes for position
-            boxes = r.boxes
-            if boxes is None:
-                continue
-
-            for i, box in enumerate(boxes):
-                cls_id = int(box.cls[0])
-                label = model.names[cls_id] if model.names else str(cls_id)
-
-                # For non-world models, post-filter by target label
-                if target_object and not hasattr(model, "set_classes"):
-                    if target_object.lower() not in label.lower():
-                        continue
-
-                conf = float(box.conf[0])
-                x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+        for query, preds in candidates_2d.items():
+            for box, prob in zip(preds["boxes"], preds["probs"]):
+                if prob < confidence_threshold:
+                    continue
+                x1, y1, x2, y2 = [int(v) for v in box]
                 cx = (x1 + x2) / 2
                 cy = (y1 + y2) / 2
-                h, w = frame_rgb.shape[:2]
-
+                label_id = query.lower().replace(" ", "_")
                 detections.append({
-                    "id": f"{label}_{i}",
-                    "label": label,
-                    "confidence": round(conf, 3),
+                    "id": f"{label_id}_{det_idx}",
+                    "label": query,
+                    "confidence": round(prob, 3),
                     "bbox_px": [x1, y1, x2, y2],
                     "x": round((cx / w - 0.5), 4),
                     "y": round((cy / h - 0.5), 4),
                     "z": None,
                     "note": "x/y are normalised image coords, not metric. Wire depth for real 3-D.",
                 })
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(
+                    annotated, f"{query} {prob:.2f}", (x1, max(y1 - 5, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1,
+                )
+                det_idx += 1
 
+        annotated_b64 = _frame_to_base64(annotated)
         return detections, annotated_b64, ""
 
     except Exception as exc:
@@ -416,7 +423,7 @@ def _observe_with_yolo(
         "note": (
             "Bounding boxes drawn on frame. x/y are normalised image coords — "
             "wire RealSense depth stream for metric 3-D positions. "
-            "Swap YOLO_MODEL= in .env for your colleague's custom weights."
+            "Model: arpa_vision YOLO_WORLD (yolov8x-worldv2_best.pt, EV battery fine-tune)."
         ),
     }
 
