@@ -179,8 +179,19 @@ def main():
 
     def _wait_save():
         nonlocal pending_save
-        if pending_save is not None:
-            pending_save.result()
+        if pending_save is None:
+            return
+        try:
+            while True:
+                try:
+                    pending_save.result(timeout=2.0)
+                    break
+                except concurrent.futures.TimeoutError:
+                    if events.get("stop_recording"):
+                        break
+        except Exception as e:
+            print(f"  Warning: episode save failed: {e}")
+        finally:
             pending_save = None
 
     try:
@@ -275,7 +286,9 @@ def main():
 
                 # ── Save episode in background ────────────────────────────────
                 log_say("Saving episode")
-                pending_save = save_executor.submit(dataset.save_episode)
+                # parallel_encoding=False: avoid ProcessPoolExecutor inside a thread —
+                # forking from a non-main thread on Linux deadlocks child processes.
+                pending_save = save_executor.submit(dataset.save_episode, parallel_encoding=False)
                 recorded += 1
                 print(f"  Episode {recorded}/{NUM_EPISODES} saving in background …")
 
