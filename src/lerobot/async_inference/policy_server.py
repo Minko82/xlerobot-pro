@@ -182,6 +182,9 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         received_bytes = receive_bytes_in_chunks(
             request_iterator, None, self.shutdown_event, self.logger
         )  # blocking call while looping over request_iterator
+        if received_bytes is None:
+            # Client disconnected mid-stream (e.g. clean shutdown or SIGTERM).
+            return services_pb2.Empty()
         timed_observation = pickle.loads(received_bytes)  # nosec
         deserialize_time = time.perf_counter() - start_deserialize
 
@@ -380,6 +383,8 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         # Stack back to (B, chunk_size, action_dim), then remove batch dim
         action_tensor = torch.stack(processed_actions, dim=1).squeeze(0)
         self.logger.debug(f"Postprocessed action shape: {action_tensor.shape}")
+
+        action_tensor = action_tensor.detach().cpu()
 
         """5. Convert to TimedAction list"""
         action_chunk = self._time_action_chunk(

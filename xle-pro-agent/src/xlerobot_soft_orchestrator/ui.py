@@ -58,19 +58,29 @@ def render_tool_status(
             parsed = _parse_tool_result(result_summary)
 
             if parsed is not None:
-                frame_b64: str = parsed.pop("frame_b64", "") or ""
+                # Extract all frame keys up front so they never leak into the Details JSON
+                frame_b64: str       = parsed.pop("frame_b64",       "") or ""
+                base_frame_b64: str  = parsed.pop("base_frame_b64",  "") or ""
+                wrist_frame_b64: str = parsed.pop("wrist_frame_b64", "") or ""
 
-                # Show the camera image first if present
-                if frame_b64:
+                def _show_image(b64: str, caption: str) -> None:
                     try:
-                        img_bytes = base64.b64decode(frame_b64)
-                        st.image(
-                            img_bytes,
-                            caption=f"Camera frame — {parsed.get('camera_info', '')}",
-                            use_container_width=True,
-                        )
+                        st.image(base64.b64decode(b64), caption=caption, use_container_width=True)
                     except Exception as exc:
-                        st.warning(f"Could not decode camera frame: {exc}")
+                        st.warning(f"Could not decode {caption}: {exc}")
+
+                if base_frame_b64 and wrist_frame_b64:
+                    col_base, col_wrist = st.columns(2)
+                    with col_base:
+                        _show_image(base_frame_b64, "Base camera")
+                    with col_wrist:
+                        _show_image(wrist_frame_b64, "Wrist camera")
+                elif base_frame_b64:
+                    _show_image(base_frame_b64, "Base camera")
+                elif wrist_frame_b64:
+                    _show_image(wrist_frame_b64, "Wrist camera")
+                elif frame_b64:
+                    _show_image(frame_b64, f"Camera frame — {parsed.get('camera_info', '')}")
 
                 # Show remaining fields as JSON (frame_b64 already popped)
                 if parsed.get("error"):
@@ -87,15 +97,16 @@ def render_tool_status(
                             "Label": obj.get("label", ""),
                             "X (m)": round(obj.get("x", 0), 4),
                             "Y (m)": round(obj.get("y", 0), 4),
-                            "Z (m)": round(obj.get("z", 0), 4),
+                            "Z (m)": round(obj.get("z") or 0, 4),
                             "Conf": round(obj.get("confidence", 0), 3),
                         })
                     st.dataframe(rows, use_container_width=True)
 
                 # Remaining metadata (note, camera_info, etc.)
+                _exclude = {"detected", "count", "error", "frame_b64", "base_frame_b64", "wrist_frame_b64"}
                 meta = {
                     k: v for k, v in parsed.items()
-                    if k not in ("detected", "count", "error", "frame_b64")
+                    if k not in _exclude
                     and v not in (None, "", [], {})
                 }
                 if meta:

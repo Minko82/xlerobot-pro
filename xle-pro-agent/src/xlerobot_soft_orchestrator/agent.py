@@ -34,11 +34,12 @@ from langgraph.graph import END, START, StateGraph
 from .capability import TOOLS
 from .config import Settings, configure_langsmith, get_settings
 
+_FRAME_B64_KEYS = ("frame_b64", "base_frame_b64", "wrist_frame_b64")
+
 def _strip_frame_b64_from_tool_messages(messages: list) -> list:
-    """Remove frame_b64 from tool result messages before they re-enter the context window.
-    
-    The base64 image string can be 300k+ tokens and is only needed by the UI.
-    The agent's reasoning loop has no use for it.
+    """Remove all *_frame_b64 keys from tool results before they re-enter the context window.
+
+    Base64 image strings can be 300k+ tokens and are only needed by the UI renderer.
     """
     import json
     cleaned = []
@@ -46,8 +47,10 @@ def _strip_frame_b64_from_tool_messages(messages: list) -> list:
         if getattr(msg, "type", None) == "tool":
             try:
                 payload = json.loads(msg.content)
-                if "frame_b64" in payload:
-                    payload["frame_b64"] = "<stripped_for_context_efficiency>"
+                if any(k in payload for k in _FRAME_B64_KEYS):
+                    for k in _FRAME_B64_KEYS:
+                        if k in payload:
+                            payload[k] = "<stripped>"
                     from langchain_core.messages import ToolMessage
                     msg = ToolMessage(
                         content=json.dumps(payload),
@@ -126,9 +129,36 @@ The "args" field:
 When the task is complete, stop calling tools and provide a concise final
 summary in plain text describing success or failure.
 
+=== CAMERA RULES ===
+You have two distinct camera views:
+  - base camera  → wide-angle scene overview (object presence, workspace state)
+  - wrist camera → close-up end-effector view (grasp quality, held object)
+
+Use the correct camera for the task:
+  - observe_with_base_camera:  scene understanding, "what's on the table?"
+  - observe_with_wrist_camera: grasp confirmation, "what's in the gripper?"
+  - observe_with_both_cameras: when you need full context simultaneously
+  - yolo_base_camera:          locate objects on the table by bounding box
+  - yolo_wrist_camera:         detect objects in close range or verify grip
+
+Always pass a specific question when calling an observe capability.
+Do not rely on frame images in your reasoning — the VLM description is your observation.
+
+=== VLA POLICY EXECUTION ===
+To run a manipulation policy:
+1. Call start_vla_policy with the appropriate policy_id.
+   This call BLOCKS until the model is loaded and the robot is already executing —
+   no extra wait needed for model download.
+2. Call wait (typically 30-60 seconds) to let the policy run further.
+3. Call observe_with_base_camera or observe_with_wrist_camera to check success.
+4. If not successful, call wait again and re-observe. Repeat until success or max attempts.
+5. Call stop_vla_policy when the task is confirmed complete.
+
+Never call start_vla_policy twice in a row — a policy is already running if SUCCESS was returned.
+
 === SAFETY RULES ===
-- Always call get_observation before any arm movement.
-- Never invent object positions — use values from get_observation results.
+- Always observe the scene before triggering any policy.
+- Never invent object positions — use values from yolo_base_camera results.
 - If a capability returns an error, read its doc again and correct your args.
 - Do not loop more than {{MAX_ITERATIONS}} times.
 """

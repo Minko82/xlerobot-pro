@@ -1,0 +1,10 @@
+# policies.yaml
+screw_picking:
+  policy_type: "smolvla"
+  repo_id: "rlodhi/smolvla_screw_picking_clean_25k"
+  task: "pick the screw"
+
+screw_placing:
+  policy_type: "smolvla"
+  repo_id: "rlodhi/smolvla_screw_placing_5000"
+  task: "place the screw in the container"
