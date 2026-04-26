@@ -1,0 +1,3 @@
+[submodule "xlerobot-agent"]
+	path = xlerobot-agent
+	url = https://github.com/rlodhicode/xlerobot-agent.git
