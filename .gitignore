@@ -176,3 +176,6 @@ data/
 # Generated runtime artifacts
 outputs/
 MUJOCO_LOG.TXT
+
+# Local paper sources and evidence; never publish from here
+manuscript/
