@@ -104,7 +104,8 @@ def detect_object(color: str = "red", captures_dir: str | Path | None = None) ->
       - intrinsic_data.json
     """
     if captures_dir is None:
-        captures_dir = Path(__file__).resolve().parent / "outputs" / "realsense_capture"
+        from xlerobot_pro.config import CAPTURE_DIR
+        captures_dir = CAPTURE_DIR
     else:
         captures_dir = Path(captures_dir)
 

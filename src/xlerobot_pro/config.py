@@ -34,6 +34,17 @@ URDF_PATH = ASSETS_DIR / "xlerobot" / "xlerobot.urdf"
 FRONT_URDF_PATH = ASSETS_DIR / "xlerobot" / "xlerobot_front.urdf"
 
 # ---------------------------------------------------------------------------
+# Capture artifacts
+# ---------------------------------------------------------------------------
+
+# Where realsense.capture() writes RGBD frames and where color_detect reads them.
+# These MUST agree: the writer used a path relative to the working directory while
+# the reader used one relative to the package, so a capture run from anywhere other
+# than the package directory silently left the reader looking at stale or absent
+# files. Defining it once here removes the mismatch.
+CAPTURE_DIR = Path(os.getenv("XLEROBOT_CAPTURE_DIR", "outputs")) / "realsense_capture"
+
+# ---------------------------------------------------------------------------
 # Calibration data
 # ---------------------------------------------------------------------------
 

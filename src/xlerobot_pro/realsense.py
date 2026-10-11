@@ -6,9 +6,11 @@ import cv2
 import numpy as np
 import pyrealsense2 as rs
 
+from xlerobot_pro.config import CAPTURE_DIR
+
 
 def capture():
-    out_dir = Path("outputs/realsense_capture")
+    out_dir = CAPTURE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pipeline = rs.pipeline()

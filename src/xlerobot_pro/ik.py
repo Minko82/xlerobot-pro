@@ -151,7 +151,10 @@ class IK_SO101:
             if best_error < position_tolerance:
                 break
 
-        if len(best_traj) >= max_timesteps:
+        # An unreachable target can leave best_traj EMPTY, and len([]) >= max_timesteps
+        # is False -- so without the emptiness check this falls through to
+        # best_traj[-1] and raises IndexError instead of reporting non-convergence.
+        if not best_traj or len(best_traj) >= max_timesteps:
             print(
                 f"IK did not converge: error={best_error * 1000:.1f}mm, steps={len(best_traj)}/{max_timesteps}"
             )
