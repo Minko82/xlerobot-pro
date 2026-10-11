@@ -45,7 +45,7 @@ These are the prices we paid. The total leaves out the 3D printer, TPU filament 
 
 ### Printing
 
-Print everything in PLA at 0.2 mm layers. The load-bearing links of both arms get **4 perimeters and 15% infill**; parts that are meant to flex stay on the default 2 perimeters; the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) is set to the default profile throughout, so change the arm links before you slice. The test results behind these settings are in [`hardware/README.md`](hardware/README.md).
+Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets **4 perimeters and 15% infill** (High-Shell), everything else stays on the default 2 perimeters, and the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) already applies these settings. The test results behind them, the Jetson mounting frame, and an editable STEP file of the arm base are in [`hardware/`](hardware/README.md) too.
 
 ### Power and buses
 
