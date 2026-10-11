@@ -66,10 +66,12 @@ nothing here will connect. Override with `XLEROBOT_ARMS_PORT` /
 
 ## Experiments
 
-The measurement-protocol tooling (A1 power integrity, A2 thermal endurance,
-B1 payload under motion, C2 inference optimization) lives **outside this repo**,
-in the companion data directory alongside the raw telemetry it produces. This
-repository is for operating the robot; that one is for research on it.
+The measurement tooling (A1 power integrity, A2 thermal and holding tests, B1
+base acceleration with a held bottle, C2 inference timing) lives **outside this
+repo**, in the companion data repository
+([xlerobot-pro-data](https://github.com/Minko82/xlerobot-pro-data)) next to the
+raw telemetry it produced. This repository is for operating the robot; that one
+holds the measurements behind the paper.
 
 Those scripts still `import xlerobot_pro`, so an editable install of this package
 is a prerequisite for running them.

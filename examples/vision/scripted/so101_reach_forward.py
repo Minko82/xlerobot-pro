@@ -10,7 +10,7 @@ from xlerobot_pro.firmware_limits import ARM_ACCELERATION, ARM_TORQUE_LIMIT
 import time
 
 PORT = "/dev/ttyACM0"
-CALIBRATION_FILE = Path(__file__).resolve().parent / "calibration" / "single_bus.json"
+CALIBRATION_FILE = Path(__file__).resolve().parents[3] / "calibration" / "single_bus.json"
 norm_mode_body = MotorNormMode.DEGREES
 
 bus = FeetechMotorsBus(

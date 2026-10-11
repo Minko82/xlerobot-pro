@@ -1,40 +1,40 @@
 #!/usr/bin/env python3
-"""Run a trained ACT checkpoint on one XLeRobot-Pro arm.
+"""Run a trained ACT checkpoint on one arm of the robot.
 
-The gap this closes: ``lerobot-train`` produces an ACT checkpoint, and until now
-nothing in this repository could execute one. ``examples/policies/`` had runners
-for the diffusion policy and SmolVLA only, and ``scripts/policy_trials.py`` takes
-``--cmd`` as a *required* argument -- so there was no way to start a trial block
-at all. Sec. VI-E of the paper depends on this file existing.
-
-Why ACT rather than the diffusion policy. The diffusion runner here is vision-only
-by construction: ``ConditionalUNet1D.forward`` takes a single conditioning vector
-built from the visual encoder, and joint positions are read and then dropped. ACT
-is state+vision by default, which is both the stronger result and the honest one
-for a paper whose thesis is that proprioceptive load matters.
-
-CONTROL RATE, and why this prints three numbers rather than one. The paper quotes
-a two-term latency model and a chunked control rate (``K=50`` giving 50.5 Hz).
-Those are bench latencies. What a reviewer will ask for is the *realised* rate
-under load, which is not the same thing once camera reads and bus writes are in
-the loop, so this reports:
-
-    inference    median ms inside predict_action alone
-    loop         median ms for the whole observe -> predict -> send cycle
-    realised     steps / wall seconds, the number Sec. VI-E should quote
-
-``policy_trials.py`` prompts the operator for the step count after each trial, so
-the final line is printed large and last, ready to be typed in.
-
-The firmware envelope (Table III) is applied before anything moves, so a policy
-cannot command the arm outside the limits the paper claims for it.
+This is the runner behind the paper's learned-grasping test (Sec. V-E): an ACT
+policy trained on the Jetson lifts a glass bottle from a shelf, on battery, and
+succeeded in 49 of 50 trials. That run used:
 
     python examples/policies/act_policy_control.py run \\
-        --checkpoint outputs/act_bottle_pickplace/checkpoints/last/pretrained_model \\
-        --duration 30
+        --checkpoint <run>/checkpoints/010000/pretrained_model \\
+        --port /dev/xle_arms --arm left --duration 25 --n-action-steps 100 \\
+        --freeze-frame --overlay calibration/hand_mask_grey88.png \\
+        --task "pick up the glass bottle from the shelf" \\
+        --camera-serial <your D435 serial>
+
+The defaults cover the rest: 30 Hz, a 640x480 image from the neck RealSense,
+the overlay region over the gripper and hand, and no temporal ensembling. With
+--freeze-frame the policy sees the first (masked) frame of the trial the whole
+time, as it did in training, plus fresh joint positions between chunks.
+
+The Table III limits (torque 450, acceleration 40, speed 100) are written to the
+arm before anything moves.
+
+At the end of a trial the script prints:
+
+    inference    median ms inside predict_action (most calls just pop the queue)
+    chunk inf.   median of the slowest calls, i.e. the passes that compute a chunk
+    realised     steps / wall-clock seconds for the whole trial, warm-up included
+
+The paper's 104.5 ms is the mean of the per-trial chunk inference times over the
+50 trials. Command throughput follows Eq. (2) of the paper,
+f_cmd = K / (K / f_exec + T_inf), so it cannot exceed the 30 Hz execution rate:
+29.25 Hz over the intervals between chunks, or 28.60 Hz per trial including
+warm-up (the "realised" number).
 
 Ctrl-C stops early and bleeds torque away rather than cutting it, so the arm
-settles instead of dropping.
+settles instead of dropping. The script needs scripts/xle_arms.py, which drives
+either arm on the shared arms bus.
 """
 
 from __future__ import annotations
@@ -73,9 +73,8 @@ except ImportError:  # running from the data checkout, where xle_arms sits along
     sys.path.insert(0, str(Path.home() / "xlerobot-pro-data" / "scripts"))
     from xle_arms import ARM_IDS, SO101FollowerArm
 
-#: Stop if any joint reaches the ceiling mid-trial. A trial that cooks the
-#: shoulder is not a policy result, and Sec. VI-E's whole point is to report
-#: success *against* joint temperature rather than despite it.
+#: Stop if any joint reaches the temperature ceiling mid-trial. A trial that
+#: overheats the shoulder is not a policy result.
 TEMP_CHECK_EVERY = 30
 
 #: Action keys starting with this are passed through unsmoothed.
@@ -244,19 +243,19 @@ def main() -> int:
                    help="Once shoulder_lift has left the start pose (> -90), shrink the "
                         "execution horizon to N steps and re-plan. The long horizon is only "
                         "needed to get through the start-pose dwell; during the reach it "
-                        "commits the arm to a 3.3 s open-loop plan that a wrist camera "
+                        "commits the arm to a 3.3 s open-loop plan that a single camera view "
                         "cannot get right in one shot (v7 trial 1 closed below the bottle).")
     r.add_argument("--temporal-ensemble", type=float, default=None, metavar="COEFF",
                    help="Infer every step and execute the exponentially weighted average of "
                         "every past chunk's prediction for the current step (ACT's own "
-                        "temporal ensembling; the paper used 0.01). Replaces the "
+                        "temporal ensembling; the original ACT paper used 0.01, and the experiments here did not use it). Replaces the "
                         "n_action_steps queue, so visual correction happens every step and "
                         "the start-pose dwell cannot lock the arm: chunks predicted earlier "
                         "already call for motion now.")
     r.add_argument("--overlay", type=Path, default=None, metavar="IMAGE",
                    help="Paste a fixed region of this 640x480 training frame onto every "
                         "live frame before inference. Kinesthetic demonstrations leave the "
-                        "operator's hand on the wrist, in the wrist camera's view; the "
+                        "operator's hand on the arm, in the neck camera's view; the "
                         "policy learned to read it, and without it closes early and short.")
     r.add_argument("--overlay-region", default="200,480,0,260", metavar="Y0,Y1,X0,X1",
                    help="Pixel box of --overlay to paste. Default covers the gripper body "
@@ -280,7 +279,7 @@ def main() -> int:
                         "shoulder_lift. The trajectory CSV shows what was executed; this shows what "
                         "each observation made the policy intend.")
     r.add_argument("--no-envelope", action="store_true",
-                   help="Skip the Table III clamp. Only for the C1 unsized experiment.")
+                   help="Skip the Table III limits. Only for experiments outside the paper's settings.")
     args = p.parse_args()
     if args.robot_id is None:
         args.robot_id = f"{args.arm}_follower"
@@ -288,8 +287,8 @@ def main() -> int:
     if not args.checkpoint.exists():
         print(f"\n  No checkpoint at {args.checkpoint}\n"
               "  Train one first:\n"
-              "    lerobot-train --policy.type=act --dataset.repo_id=local/bottle_pickplace \\\n"
-              "        --output_dir=outputs/act_bottle_pickplace --policy.device=cuda\n",
+              "    lerobot-train --policy.type=act --dataset.repo_id=<your dataset> \\\n"
+              "        --output_dir=outputs/act_run --policy.device=cuda\n",
               file=sys.stderr)
         return 1
 
@@ -338,8 +337,8 @@ def main() -> int:
     print(f"  ACT on {device}   chunk_size={chunk}  n_action_steps={n_act}")
     if isinstance(n_act, int) and isinstance(chunk, int) and n_act == chunk:
         print(f"  NOTE: one inference commits {n_act} open-loop steps "
-              f"({n_act / args.fps:.1f} s at {args.fps:g} Hz). Sec. VI-E should say so "
-              "next to the quoted control rate.")
+              f"({n_act / args.fps:.1f} s at {args.fps:g} Hz). Report that alongside "
+              "any control rate you quote.")
 
     cfg_robot = SO101FollowerConfig(
         port=args.port, id=args.robot_id,

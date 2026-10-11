@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-Replay one episode from: lerobot/svla_so101_pickplace
+Replay one episode from the lerobot/svla_so101_pickplace dataset on one arm.
 
-- Connects to SO100Follower (same pattern as your controller).
-- Optionally connects to top+wrist OpenCV cameras for live monitoring.
-- Loads a HuggingFace dataset episode and replays stored actions step-by-step.
+Despite the file name, this does not run a SmolVLA model, and it is not the
+benchmark behind the paper's SmolVLA timings. It is a quick way to check that an
+arm follows a recorded trajectory:
+
+- Connects to an SO100Follower.
+- Optionally connects to top and wrist OpenCV cameras for live monitoring.
+- Loads a Hugging Face dataset episode and replays the stored actions step by step.
 
 Run:
-  python replay_svla_episode.py --episode 0 --robot_port /dev/ttyACM0
+  python examples/policies/smolvla_policy_control.py --episode 0 --robot_port /dev/ttyACM0
 """
 
 import argparse

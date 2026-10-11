@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Diffusion Policy Inference Script for SO-101 Robot Arm
+A small, self-contained diffusion policy for an SO-101 arm.
 
-This script runs a trained diffusion policy model on an SO-101 (or SO-100) robot arm.
-It handles:
+This is a toy implementation (simple CNN encoder, 96x96 input, 8-action horizon)
+for rough timing and experiments. Its benchmark mode runs on random weights and
+random images. It cannot load LeRobot's diffusion checkpoints, and it is not the
+source of the paper's Diffusion Policy timing. Use LeRobot's DiffusionPolicy for
+that. It handles:
 - Robot connection and control via lerobot
 - Camera observation capture
 - Diffusion policy inference
@@ -15,10 +18,10 @@ Requirements:
 
 Usage:
     # Benchmark mode (no robot needed) - test inference speed
-    python run_diffusion_policy_so101.py --benchmark --num-runs 100
+    python examples/policies/diffusion_policy_control.py --benchmark --num-runs 100
     
     # Robot operation mode
-    python run_diffusion_policy_so101.py --checkpoint path/to/checkpoint --robot-port /dev/ttyUSB0
+    python examples/policies/diffusion_policy_control.py --checkpoint path/to/checkpoint --robot-port /dev/ttyUSB0
 """
 
 import argparse
