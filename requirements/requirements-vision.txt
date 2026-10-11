@@ -4,9 +4,12 @@
 #   pip install -r requirements/requirements-vision.txt
 #
 # Verified working combination (tests/vision_offline_suite.py: 49/49 pass).
+# These match the versions installed on the robot when the paper's experiments ran.
 
-pin==3.4.0          # pinocchio (FK / model loading)
-pin-pink>=4.2.0     # differential IK
+pin==3.4.0              # pinocchio (FK / model loading)
+cmeel-urdfdom==4.0.1    # pin 3.4.0 is built against urdfdom 4; newer releases fail to load
+cmeel-tinyxml2==10.0.0  # required by urdfdom 4
+pin-pink==4.3.0         # differential IK (the version cited in the paper)
 quadprog>=0.1.13    # QP solver used by the IK loop (qpsolvers backend)
 mujoco>=3.3.7       # MJCF model loading / visualization
 matplotlib          # IK target plots (xlerobot_pro.viz)
