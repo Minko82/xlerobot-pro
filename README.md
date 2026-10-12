@@ -8,9 +8,9 @@ This repository holds the software, the servo settings, and the print files. The
 
 ## What changed from XLeRobot
 
-XLeRobot runs its learned policies on a laptop that you supply. Putting the computer on the robot exposed two problems, and fixing them is most of what this build adds.
+In its $660 configuration, XLeRobot runs its learned policies on a laptop that you supply; an optional Raspberry Pi can run a small ACT policy, but training and larger models need another computer. Putting the computer on the robot exposed two problems, and fixing them is most of what this build adds.
 
-- **Power.** With all 17 servos on one supply, moving the arms and neck together browned it out in 5 of 5 stress trials, and each collapse needed a power cycle. Now the arms draw from the power station's 12 V car outlet, the head and wheels from one USB-C outlet, and the Jetson from another. Under the same protocol, with the firmware settings below, none of 5 trials browned out.
+- **Power.** In XLeRobot's wiring, each arm shares a servo bus with either the head or the wheels, and each bus draws from its own USB-C outlet. Moving an arm and the head together browned out the shared bus in 5 of 5 stress trials, and each collapse needed a power cycle. Now both arms draw from the power station's 12 V car outlet, the head and wheels from one USB-C outlet, and the Jetson from another. Under the same protocol, with the firmware settings below, none of 5 trials browned out.
 - **Printed links.** On the default print profile, the arm broke at a printed link before the servo gave out. Printing the load-bearing links with 4 perimeters instead of 2 raised the arm's failure load by 67% (18.5 N against 11.1 N) for 80 g more per arm, and the failure moved to the servo.
 - **Compute.** A Jetson Orin Nano Super sits in a passively ducted enclosure at the center of the cart, with a RealSense D435 on the neck. Together they account for $594 of the total.
 
@@ -20,12 +20,13 @@ These are the paper's measurements. Each holds for the conditions next to it.
 
 | | Result | Conditions |
 |---|---|---|
-| Learned grasping | 49 of 50 trials | ACT trained on the Jetson in under an hour; the left arm lifts a 100 ml glass bottle from a shelf; one marked bottle pose; base stationary; on battery |
-| Policy timing | ACT 104.5 ms, Diffusion Policy 540 ms, SmolVLA 997 ms | One pass on the Jetson in MAXN SUPER; 10 sampling steps for Diffusion Policy and SmolVLA |
-| Shoulder hold | 0.7 kg for 30 min | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped |
-| Teleoperated grasping | 74 of 75 attempts | Five objects, 15 attempts each, with the Fin-Ray fingers |
+| Learned grasping | 49 of 50 trials | ACT trained on the Jetson in under an hour; the left arm lifts a 100 mL glass bottle from a shelf; one marked bottle pose; base stationary; on battery |
+| Policy timing | ACT 104.5 ms, Diffusion Policy 540 ms, SmolVLA 997 ms | One pass on the Jetson in MAXN SUPER; 10 denoising steps for Diffusion Policy and SmolVLA |
+| Shoulder hold | 0.7 kg for 30 min | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped. The 0.7 kg hold probably ran with the power station on pass-through charging, which kept a matched 0.8 kg hold 2 °C cooler |
+| Teleoperated grasping | 74 of 75 attempts | Five objects (a plastic apple, a cube, a drill, a water bottle, and a screwdriver), 15 attempts each, with the Fin-Ray fingers; the one miss was the 17 g apple |
+| Battery | About 13–16 h of SmolVLA inference, about 17 h holding loads | Projected from whole-percent charge readings on the 288 Wh power station, not run to depletion |
 
-Navigation, autonomous two-arm coordination, mobile manipulation, and battery runtime were not evaluated.
+The holding results come from one servo, and the grasping policy was tested at one bottle pose with a fixed camera image. Navigation, autonomous two-arm coordination, and mobile manipulation were not evaluated.
 
 ## Hardware
 
@@ -56,8 +57,8 @@ Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets *
 | Jetson | | A second USB-C | USB-C to DC5525, 140 W (PD) | | |
 
 - Plug both bus adapters straight into the Jetson. Behind USB hubs shared with the camera they failed to enumerate, which looks exactly like a dead bus.
-- The outlets share one battery, but arm motion no longer shares an outlet with the base or the computer. The build adds no fuses; each outlet on the power station shuts off on overload.
-- The arm torque setting comes from a simple current estimate (Eq. 1 in the paper). With two arm joints loaded at 450 and the other ten idle, the arm bus draws about 4.4 A, under a 5 A budget that is half the car outlet's 10 A rating. One arm peaked at 1.41 A in testing. Bus 2's current margin was not measured.
+- The outlets share one battery, but the arms no longer share a bus with the head or the wheels. The build adds no fuses; each outlet on the power station shuts off on overload.
+- The arm torque setting comes from a simple current estimate (Eq. 1 in the paper). With all 12 arm servos at no-load current and two of them loaded at 450, the estimate is about 4.4 A (4.6 A with the datasheet's listed torque constant), under a 5 A budget that is half the car outlet's 10 A rating. One arm peaked at 1.41 A in testing. Bus 2's current margin was not measured.
 - All limits live in [`src/xlerobot_pro/firmware_limits.py`](src/xlerobot_pro/firmware_limits.py) and are applied automatically whenever a robot connects.
 
 ### Motor IDs
@@ -235,7 +236,7 @@ More bus, motor, and frame-transform tools are in [`diagnostics/`](diagnostics/R
 
 ## Citation
 
-The paper describing this platform is under review. A citation will be added here.
+The paper describing this platform, "Cutting the Cord: System Design and Characterization of a Low-Cost, Untethered Bimanual Mobile Manipulator," is under review. A citation will be added here.
 
 ## Acknowledgements
 

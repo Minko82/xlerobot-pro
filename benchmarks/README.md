@@ -24,6 +24,11 @@ Table VII come from 60-second runs at `--num-steps` 2, 3, 5, and 10 and
 pass it with `--model`. The default is `lerobot/smolvla_base`, which has the same
 architecture.
 
+Fewer steps are faster but not free. In a separate 30-minute run at
+`--num-steps 2 --chunk 50`, module power was 3.2 W higher than at 10 steps and
+the GPU clock averaged about 9% lower in the last third of the run than in the
+first. Task success at reduced step counts was not tested.
+
 ## Diffusion Policy
 
 ```bash
@@ -32,7 +37,7 @@ python benchmarks/diffusion_benchmark.py --num-steps 10 --camera /dev/video2
 
 This loads LeRobot's `DiffusionPolicy` with the public `lerobot/diffusion_pusht`
 checkpoint. The paper's Diffusion Policy row (539.6 ms) is an end-to-end time,
-from camera capture to action output, at 10 sampling steps.
+from camera capture to action output, at 10 denoising steps.
 
 ## A note on the printed rates
 

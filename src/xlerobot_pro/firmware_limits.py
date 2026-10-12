@@ -14,9 +14,11 @@ The arm setting comes from the paper's current estimate, Eq. (1):
     I_est = N * I0 + N_a * T / K_t,    K_t = T_stall / (I_stall - I0) = 1.167 N*m/A
 
 With the datasheet values (T_stall = 2.94 N*m, I0 = 0.18 A, I_stall = 2.7 A),
-two arm joints loaded at Torque_Limit 450 (1.32 N*m nominal) and the other ten
-at I0 give about 4.43 A, under a 5 A design budget for the arm bus (half the car
-outlet's 10 A rating). At 650 the same case gives about 5.44 A. This is a
+all twelve arm servos at I0, two of them also loaded at Torque_Limit 450
+(1.32 N*m nominal), give about 4.43 A, under a 5 A design budget for the arm bus
+(half the car outlet's 10 A rating). At 650 the same case gives about 5.44 A.
+The datasheet's listed torque constant (11 kg*cm/A, 1.08 N*m/A) gives 4.61 and
+5.70 A instead, so either way the estimate favors 450. This is a
 nominal estimate, not a stall guarantee: twelve arm joints all loaded at 450
 would draw far more.
 
