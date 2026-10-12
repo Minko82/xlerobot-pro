@@ -11,17 +11,18 @@ from lerobot.robots.xlerobot import XLerobot, XLerobotConfig
 
 def cleanup(robot: XLerobot):
     print("\nUnlocking arm and disconnecting...")
+    # Best effort: the script is exiting either way, so a failed disconnect is not raised.
     try:
         if robot.bus1.is_connected:
             robot.bus1.disconnect(robot.config.disable_torque_on_disconnect)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # In case the script is run against dual-arm hardware in the future.
     try:
         if robot.bus2.is_connected:
             robot.bus2.disconnect(robot.config.disable_torque_on_disconnect)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     print("Done. Arm is free.")

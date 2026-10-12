@@ -23,35 +23,65 @@ from lerobot.utils.constants import (
     OBS_STATE,
 )
 
-DEFAULT_CAMERA   = "/dev/video0"
-DEFAULT_TASK     = "pick up the object and place it in the box"
-DEFAULT_MODEL    = "lerobot/smolvla_base"
-DEFAULT_DURATION = 30    # 5 minutes default; use --duration 3600 for 1 hour
-ACTION_CHUNK     = 5      # n_action_steps override
-ACTION_DIM       = 6       # how many action dims to print (model outputs 32)
-WARMUP_STEPS     = 5      # discard first N steps from stats (JIT / cache warmup)
-LOG_INTERVAL     = 20
+DEFAULT_CAMERA = "/dev/video0"
+DEFAULT_TASK = "pick up the object and place it in the box"
+DEFAULT_MODEL = "lerobot/smolvla_base"
+DEFAULT_DURATION = 30  # 5 minutes default; use --duration 3600 for 1 hour
+ACTION_CHUNK = 5  # n_action_steps override
+ACTION_DIM = 6  # how many action dims to print (model outputs 32)
+WARMUP_STEPS = 5  # discard first N steps from stats (JIT / cache warmup)
+LOG_INTERVAL = 20
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="SmolVLA-base inference speed benchmark")
-    p.add_argument("--model",    default=DEFAULT_MODEL)
-    p.add_argument("--camera",   default=DEFAULT_CAMERA)
-    p.add_argument("--task",     default=DEFAULT_TASK)
-    p.add_argument("--duration", type=int,   default=DEFAULT_DURATION,  help="Benchmark duration in seconds")
-    p.add_argument("--chunk",      type=int, default=ACTION_CHUNK, help="chunk_size: how many actions the model outputs per forward pass")
-    p.add_argument("--n-action-steps", type=int, default=None, help="how many actions to execute before re-planning (defaults to --chunk)")
-    p.add_argument("--num-steps",  type=int, default=None, help="denoising steps per forward pass (default: from model config, typically 10)")
-    p.add_argument("--device",         default=None, help="'cpu', 'cuda', or None for auto")
-    p.add_argument("--width",          type=int, default=320)
-    p.add_argument("--height",         type=int, default=240)
-    p.add_argument("--resize-imgs",    type=int, default=None, help="override resize_imgs_with_padding to NxN (default: from model config, typically 512)")
-    p.add_argument("--compile", action="store_true",
-                   help="wrap the model in torch.compile(mode='reduce-overhead') to capture CUDA graphs")
-    p.add_argument("--warmup", type=int, default=None,
-                   help="override warmup steps; raise it with --compile, since compilation happens on the first calls")
-    p.add_argument("--quiet", action="store_true",
-                   help="suppress the per-step action dump (chunk 50 prints 50 lines per step)")
+    p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--camera", default=DEFAULT_CAMERA)
+    p.add_argument("--task", default=DEFAULT_TASK)
+    p.add_argument("--duration", type=int, default=DEFAULT_DURATION, help="Benchmark duration in seconds")
+    p.add_argument(
+        "--chunk",
+        type=int,
+        default=ACTION_CHUNK,
+        help="chunk_size: how many actions the model outputs per forward pass",
+    )
+    p.add_argument(
+        "--n-action-steps",
+        type=int,
+        default=None,
+        help="how many actions to execute before re-planning (defaults to --chunk)",
+    )
+    p.add_argument(
+        "--num-steps",
+        type=int,
+        default=None,
+        help="denoising steps per forward pass (default: from model config, typically 10)",
+    )
+    p.add_argument("--device", default=None, help="'cpu', 'cuda', or None for auto")
+    p.add_argument("--width", type=int, default=320)
+    p.add_argument("--height", type=int, default=240)
+    p.add_argument(
+        "--resize-imgs",
+        type=int,
+        default=None,
+        help="override resize_imgs_with_padding to NxN (default: from model config, typically 512)",
+    )
+    p.add_argument(
+        "--compile",
+        action="store_true",
+        help="wrap the model in torch.compile(mode='reduce-overhead') to capture CUDA graphs",
+    )
+    p.add_argument(
+        "--warmup",
+        type=int,
+        default=None,
+        help="override warmup steps; raise it with --compile, since compilation happens on the first calls",
+    )
+    p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress the per-step action dump (chunk 50 prints 50 lines per step)",
+    )
     p.add_argument("--json-out", default=None, help="write final metrics to this path as JSON")
     return p.parse_args()
 
@@ -68,9 +98,10 @@ def get_device(requested: str | None) -> str:
 
 # ── model ─────────────────────────────────────────────────────────────────────
 
+
 def load_policy(model_id: str, device: str) -> SmolVLAPolicy:
     print(f"[{ts()}] Loading '{model_id}' …")
-    
+
     # Load on CPU first to prevent CUDA allocator spikes, then convert to fp16.
     # The checkpoint config pins device="cuda", which makes from_pretrained pull
     # the safetensors straight onto the GPU at full precision -- that peak OOMs
@@ -101,11 +132,12 @@ def tokenize_task(policy: SmolVLAPolicy, task: str, device: str):
 
 # ── camera ────────────────────────────────────────────────────────────────────
 
+
 def open_camera(path: str, width: int, height: int) -> cv2.VideoCapture:
     cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open camera: {path}")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -121,18 +153,19 @@ def capture_frame(cap: cv2.VideoCapture, device: str, resize: tuple[int, int] | 
     if resize is not None:
         rgb = cv2.resize(rgb, resize, interpolation=cv2.INTER_LINEAR)
     t = torch.from_numpy(rgb).half().div(255.0)
-    t   = t.permute(2, 0, 1).unsqueeze(0)   # [1, 3, H, W]
+    t = t.permute(2, 0, 1).unsqueeze(0)  # [1, 3, H, W]
     return t.to(device)
 
 
 # ── batch ─────────────────────────────────────────────────────────────────────
 
+
 def build_batch(
-    policy:      SmolVLAPolicy,
-    img_tensor:  torch.Tensor,
+    policy: SmolVLAPolicy,
+    img_tensor: torch.Tensor,
     lang_tokens: torch.Tensor,
-    lang_mask:   torch.Tensor,
-    device:      str,
+    lang_mask: torch.Tensor,
+    device: str,
 ) -> dict[str, torch.Tensor]:
     batch: dict[str, torch.Tensor] = {}
 
@@ -144,22 +177,23 @@ def build_batch(
     state_dim = state_features[OBS_STATE].shape[0] if state_features else policy.config.max_state_dim
     batch[OBS_STATE] = torch.zeros(1, state_dim, dtype=torch.float16, device=device)
 
-    batch[OBS_LANGUAGE_TOKENS]         = lang_tokens
+    batch[OBS_LANGUAGE_TOKENS] = lang_tokens
     batch[OBS_LANGUAGE_ATTENTION_MASK] = lang_mask
     return batch
 
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 
+
 class Timer:
     """Accumulates timing samples and computes percentile stats."""
 
     def __init__(self, name: str):
-        self.name    = name
+        self.name = name
         self.samples: list[float] = []
 
     def record(self, elapsed_s: float):
-        self.samples.append(elapsed_s * 1000.0)   # store in ms
+        self.samples.append(elapsed_s * 1000.0)  # store in ms
 
     def report(self, indent: str = "  ") -> str:
         if not self.samples:
@@ -186,6 +220,7 @@ class Timer:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def run(args):
     device = get_device(args.device)
     print(f"[{ts()}] Device: {device}")
@@ -194,6 +229,7 @@ def run(args):
 
     # Override action chunk size
     from collections import deque
+
     n_action_steps = args.n_action_steps if args.n_action_steps is not None else args.chunk
     policy.config.chunk_size = args.chunk
     policy.config.n_action_steps = n_action_steps
@@ -216,12 +252,16 @@ def run(args):
         except Exception as exc:
             print(f"[{ts()}] [warn] torch.compile FAILED: {type(exc).__name__}: {exc}")
 
-    warmup_steps = args.warmup if args.warmup is not None else (WARMUP_STEPS + 10 if args.compile else WARMUP_STEPS)
+    warmup_steps = (
+        args.warmup if args.warmup is not None else (WARMUP_STEPS + 10 if args.compile else WARMUP_STEPS)
+    )
 
-    print(f"[{ts()}] chunk_size={args.chunk}, n_action_steps={n_action_steps}, num_steps={policy.config.num_steps}")
+    print(
+        f"[{ts()}] chunk_size={args.chunk}, n_action_steps={n_action_steps}, num_steps={policy.config.num_steps}"
+    )
     print(f"[{ts()}] resize_imgs={policy.config.resize_imgs_with_padding}")
 
-    img_keys   = list(policy.config.image_features.keys())
+    img_keys = list(policy.config.image_features.keys())
     action_dim = policy.config.action_feature.shape[0]
     print(f"[{ts()}] Image keys : {img_keys}")
     print(f"[{ts()}] Action dim : {action_dim}")
@@ -236,23 +276,25 @@ def run(args):
     if resize:
         print(f"[{ts()}] SW resize   : {actual_w}×{actual_h} → {args.width}×{args.height}")
 
-    t_capture  = Timer("capture + preprocess")
-    t_batch    = Timer("batch construction")
-    t_infer    = Timer("model forward (select_action)")
-    t_end2end  = Timer("end-to-end (capture → action)")
+    t_capture = Timer("capture + preprocess")
+    t_batch = Timer("batch construction")
+    t_infer = Timer("model forward (select_action)")
+    t_end2end = Timer("end-to-end (capture → action)")
 
-    step       = 0
+    step = 0
     start_time = time.monotonic()
-    deadline   = None                       # set when the first measured step begins
-    hard_stop  = start_time + args.duration + 1200   # backstop if compilation hangs
+    deadline = None  # set when the first measured step begins
+    hard_stop = start_time + args.duration + 1200  # backstop if compilation hangs
 
     print(f"\n[{ts()}] Warming up for {warmup_steps} steps, then benchmarking for {args.duration}s …\n")
 
     stop = False
+
     def _sigint(sig, frame):
         nonlocal stop
         print(f"\n[{ts()}] Interrupted.")
         stop = True
+
     signal.signal(signal.SIGINT, _sigint)
 
     try:
@@ -265,12 +307,12 @@ def run(args):
             e2e_start = time.monotonic()
 
             # ── 1. capture ────────────────────────────────────────────────────
-            t0  = time.monotonic()
+            t0 = time.monotonic()
             img = capture_frame(cap, device, resize)
             dt_capture = time.monotonic() - t0
 
             # ── 2. batch ──────────────────────────────────────────────────────
-            t0    = time.monotonic()
+            t0 = time.monotonic()
             batch = build_batch(policy, img, lang_tokens, lang_mask, device)
             dt_batch = time.monotonic() - t0
 
@@ -292,9 +334,9 @@ def run(args):
             tag = "bench" if measuring else "warm "
             print(
                 f"[{ts()}] #{step:>5d} [{tag}] "
-                f"e2e={dt_e2e*1000:7.1f}ms  "
-                f"infer={dt_infer*1000:7.1f}ms  "
-                f"cap={dt_capture*1000:5.1f}ms"
+                f"e2e={dt_e2e * 1000:7.1f}ms  "
+                f"infer={dt_infer * 1000:7.1f}ms  "
+                f"cap={dt_capture * 1000:5.1f}ms"
             )
             if not args.quiet:
                 chunk_np = chunk.squeeze(0).cpu().numpy()  # (chunk_size, action_dim)
@@ -306,7 +348,7 @@ def run(args):
                 n = len(t_end2end.samples)
                 mean_e2e_ms = np.mean(t_end2end.samples)
                 max_replan_hz = 1000.0 / mean_e2e_ms
-                max_ctrl_hz   = max_replan_hz * n_action_steps
+                max_ctrl_hz = max_replan_hz * n_action_steps
                 print(
                     f"\n  [live] after {n} bench steps — "
                     f"e2e mean={mean_e2e_ms:.1f}ms  |  "
@@ -326,13 +368,13 @@ def run(args):
         print("  Raise --duration or lower --warmup. Nothing written.")
         return
 
-    print(f"\n{'='*60}")
-    print(f"  SmolVLA-base inference benchmark — final report")
+    print(f"\n{'=' * 60}")
+    print("  SmolVLA-base inference benchmark — final report")
     print(f"  model  : {args.model}")
     print(f"  device : {device}")
     print(f"  num_steps: {policy.config.num_steps}")
     print(f"  task   : {args.task}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  wall time      : {wall_s:.1f}s")
     print(f"  warmup steps   : {WARMUP_STEPS}")
     print(f"  benchmark steps: {bench_n}")
@@ -345,18 +387,20 @@ def run(args):
     print()
     print(t_end2end.report())
     print()
-    mean_e2e_ms   = np.mean(t_end2end.samples)
+    mean_e2e_ms = np.mean(t_end2end.samples)
     max_replan_hz = 1000.0 / mean_e2e_ms
-    max_ctrl_hz   = max_replan_hz * n_action_steps
+    max_ctrl_hz = max_replan_hz * n_action_steps
     print(f"  chunk_size     : {args.chunk}")
     print(f"  n_action_steps : {n_action_steps}")
     print()
     print(f"  >> max replan frequency : {max_replan_hz:.3f} Hz  (1 / e2e latency)")
     print(f"  >> max control frequency: {max_ctrl_hz:.3f} Hz  (replan_hz × n_action_steps)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if args.json_out:
-        import json as _json, os as _os
+        import json as _json
+        import os as _os
+
         payload = {
             "model": args.model,
             "device": device,

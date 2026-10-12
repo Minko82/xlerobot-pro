@@ -248,8 +248,8 @@ class VRMonitor:
             self.is_running = True
             print("✅ VR Monitor is now running")
 
-            # Display connection information
-            host_display = get_local_ip() if self.config.host_ip == "0.0.0.0" else self.config.host_ip
+            # Display connection information (comparing against 0.0.0.0, not binding to it)
+            host_display = get_local_ip() if self.config.host_ip == "0.0.0.0" else self.config.host_ip  # nosec B104
             print("📱 Open your VR headset browser and navigate to:")
             print(f"   https://{host_display}:{self.config.https_port}")
             print("🎯 Press Ctrl+C to stop monitoring")

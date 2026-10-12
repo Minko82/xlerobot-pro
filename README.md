@@ -18,13 +18,13 @@ In its $660 configuration, XLeRobot runs its learned policies on a laptop that y
 
 These are the paper's measurements. Each holds for the conditions next to it.
 
-| | Result | Conditions |
-|---|---|---|
-| Learned grasping | 49 of 50 trials | ACT trained on the Jetson in under an hour; the left arm lifts a 100 mL glass bottle from a shelf; one marked bottle pose; base stationary; on battery |
-| Policy timing | ACT 104.5 ms, Diffusion Policy 540 ms, SmolVLA 997 ms | One pass on the Jetson in MAXN SUPER; 10 denoising steps for Diffusion Policy and SmolVLA |
-| Shoulder hold | 0.7 kg for 30 min | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped. All holds ran on battery |
-| Teleoperated grasping | 74 of 75 attempts | Five objects (a plastic apple, a cube, a drill, a water bottle, and a screwdriver), 15 attempts each, with the Fin-Ray fingers; the one miss was the 17 g apple |
-| Battery | About 13–16 h of SmolVLA inference, about 17 h holding loads | Projected from whole-percent charge readings on the 288 Wh power station, not run to depletion |
+|                       | Result                                                       | Conditions                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Learned grasping      | 49 of 50 trials                                              | ACT trained on the Jetson in under an hour; the left arm lifts a 100 mL glass bottle from a shelf; one marked bottle pose; base stationary; on battery                |
+| Policy timing         | ACT 104.5 ms, Diffusion Policy 540 ms, SmolVLA 997 ms        | One pass on the Jetson in MAXN SUPER; 10 denoising steps for Diffusion Policy and SmolVLA                                                                             |
+| Shoulder hold         | 0.7 kg for 30 min                                            | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped. All holds ran on battery |
+| Teleoperated grasping | 74 of 75 attempts                                            | Five objects (a plastic apple, a cube, a drill, a water bottle, and a screwdriver), 15 attempts each, with the Fin-Ray fingers; the one miss was the 17 g apple       |
+| Battery               | About 13–16 h of SmolVLA inference, about 17 h holding loads | Projected from whole-percent charge readings on the 288 Wh power station, not run to depletion                                                                        |
 
 The holding results come from one servo, and the grasping policy was tested at one bottle pose with a fixed camera image. Navigation, autonomous two-arm coordination, and mobile manipulation were not evaluated.
 
@@ -32,15 +32,15 @@ The holding results come from one servo, and the grasping policy was tested at o
 
 ### Parts
 
-| Subsystem | Component | Qty | USD |
-|---|---|---|---|
-| Compute | Jetson Orin Nano Super + microSD | 1 | 260.23 |
-| Perception | Intel RealSense D435 | 1 | 333.75 |
-| Actuation | Feetech STS3215, 12 V (ST-3215-C018) + 2 bus driver boards | 17 | 292.93 |
-| Power | Anker SOLIX C300 DC power station | 1 | 159.99 |
-| Structure | IKEA RÅSKOG steel cart, 3 omni wheels, PLA (incl. Jetson enclosure), fasteners | 1 | 129.95 |
-| Cabling | USB-C hub, power cables, connectors | 7 | 70.42 |
-| **Total** | | | **1,247.27** |
+| Subsystem  | Component                                                                      | Qty | USD          |
+| ---------- | ------------------------------------------------------------------------------ | --- | ------------ |
+| Compute    | Jetson Orin Nano Super + microSD                                               | 1   | 260.23       |
+| Perception | Intel RealSense D435                                                           | 1   | 333.75       |
+| Actuation  | Feetech STS3215, 12 V (ST-3215-C018) + 2 bus driver boards                     | 17  | 292.93       |
+| Power      | Anker SOLIX C300 DC power station                                              | 1   | 159.99       |
+| Structure  | IKEA RÅSKOG steel cart, 3 omni wheels, PLA (incl. Jetson enclosure), fasteners | 1   | 129.95       |
+| Cabling    | USB-C hub, power cables, connectors                                            | 7   | 70.42        |
+| **Total**  |                                                                                |     | **1,247.27** |
 
 These are the prices we paid. The total leaves out the 3D printer, TPU filament for the fingers, and the VR headset used for teleoperation. The [components page](https://minko82.github.io/xlerobot-pro-website/components.html) lists every line item with a link.
 
@@ -50,11 +50,11 @@ Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets *
 
 ### Power and buses
 
-| Supply | Loads | Outlet | Cable | Torque_Limit | Acceleration |
-|---|---|---|---|---|---|
-| Bus 1 (`/dev/xle_arms`) | 12 arm servos | 12 V car outlet | Car socket to DC5521 | 450 | 40 |
-| Bus 2 (`/dev/xle_head`) | 2 head and 3 wheel servos | USB-C | USB-C to DC5521 (PD) | 650 | 20 |
-| Jetson | | A second USB-C | USB-C to DC5525, 140 W (PD) | | |
+| Supply                  | Loads                     | Outlet          | Cable                       | Torque_Limit | Acceleration |
+| ----------------------- | ------------------------- | --------------- | --------------------------- | ------------ | ------------ |
+| Bus 1 (`/dev/xle_arms`) | 12 arm servos             | 12 V car outlet | Car socket to DC5521        | 450          | 40           |
+| Bus 2 (`/dev/xle_head`) | 2 head and 3 wheel servos | USB-C           | USB-C to DC5521 (PD)        | 650          | 20           |
+| Jetson                  |                           | A second USB-C  | USB-C to DC5525, 140 W (PD) |              |              |
 
 - Plug both bus adapters straight into the Jetson. Behind USB hubs shared with the camera they failed to enumerate, which looks exactly like a dead bus.
 - The outlets share one battery, but the arms no longer share a bus with the head or the wheels. The build adds no fuses; each outlet on the power station shuts off on overload.
@@ -63,10 +63,10 @@ Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets *
 
 ### Motor IDs
 
-| Bus | IDs |
-|---|---|
+| Bus   | IDs                                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------- |
 | Bus 1 | Left arm 1–6, right arm 7–12. In each arm: shoulder pan, shoulder lift, elbow flex, wrist flex, wrist roll, gripper |
-| Bus 2 | Head: 1 tilt, 2 pan. Wheels: 3 left, 4 back, 5 right |
+| Bus 2 | Head: 1 tilt, 2 pan. Wheels: 3 left, 4 back, 5 right                                                                |
 
 ## Getting started
 
@@ -196,34 +196,34 @@ The robot also runs RTAB-Map and Nav2 in a separate ROS 2 workspace. That worksp
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `Permission denied: /dev/ttyACM0` | Add yourself to `dialout` and log in again (step 5) |
-| `could not open port /dev/xle_arms` | The udev names do not exist yet (step 5) |
-| A servo is missing from a bus scan | Check its ID (step 6) and the cable to its neighbor |
-| Servos answer but never move | The bus has logic power but no servo power. Read `Present_Voltage`: about 120–135 means 12 V and is healthy; about 50 means the bus is on a 5 V feed |
-| A bus disappears after the base drives | A cable was tugged loose. Look for `error -110` or `unable to enumerate` in `dmesg`, and add strain relief before driving again |
-| An arm drops when a script ends | Torque was cut instead of bled off; see [`diagnostics/README.md`](diagnostics/README.md) |
-| `ModuleNotFoundError: lerobot` | Activate the environment and run `pip install -e ".[all]"` again |
-| `import pinocchio` fails over a missing `liburdfdom` library | Reinstall from `requirements/requirements-vision.txt`, which pins compatible versions |
-| RealSense frames time out | Replug the USB 3 cable and check `rs-enumerate-devices` |
+| Symptom                                                      | Fix                                                                                                                                                  |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Permission denied: /dev/ttyACM0`                            | Add yourself to `dialout` and log in again (step 5)                                                                                                  |
+| `could not open port /dev/xle_arms`                          | The udev names do not exist yet (step 5)                                                                                                             |
+| A servo is missing from a bus scan                           | Check its ID (step 6) and the cable to its neighbor                                                                                                  |
+| Servos answer but never move                                 | The bus has logic power but no servo power. Read `Present_Voltage`: about 120–135 means 12 V and is healthy; about 50 means the bus is on a 5 V feed |
+| A bus disappears after the base drives                       | A cable was tugged loose. Look for `error -110` or `unable to enumerate` in `dmesg`, and add strain relief before driving again                      |
+| An arm drops when a script ends                              | Torque was cut instead of bled off; see [`diagnostics/README.md`](diagnostics/README.md)                                                             |
+| `ModuleNotFoundError: lerobot`                               | Activate the environment and run `pip install -e ".[all]"` again                                                                                     |
+| `import pinocchio` fails over a missing `liburdfdom` library | Reinstall from `requirements/requirements-vision.txt`, which pins compatible versions                                                                |
+| RealSense frames time out                                    | Replug the USB 3 cable and check `rs-enumerate-devices`                                                                                              |
 
 More bus, motor, and frame-transform tools are in [`diagnostics/`](diagnostics/README.md).
 
 ## Repository layout
 
-| Path | Contents |
-|---|---|
-| [`src/lerobot/`](src/lerobot/) | LeRobot fork with this robot's classes and teleoperators |
-| [`src/xlerobot_pro/`](src/xlerobot_pro/) | Vision and IK library, robot model, and the servo limits |
-| [`examples/`](examples/README.md) | Bring-up, teleoperation, policy, and vision examples |
-| [`benchmarks/`](benchmarks/README.md) | The SmolVLA and Diffusion Policy timing scripts used in the paper |
-| [`scripts/`](scripts/) | Whole-robot calibration and the two-arm bus helper |
-| [`diagnostics/`](diagnostics/README.md) | Bus, motor, and frame-transform debugging tools |
-| [`calibration/`](calibration/) | Reference calibrations and the hand mask used for the grasping policy |
-| [`hardware/`](hardware/README.md) | Print files, print settings, and the URDF |
-| [`requirements/`](requirements/) | Vision requirements and lockfiles |
-| [`tests/`](tests/) | Hardware-free tests (`make smoke`) |
+| Path                                     | Contents                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| [`src/lerobot/`](src/lerobot/)           | LeRobot fork with this robot's classes and teleoperators              |
+| [`src/xlerobot_pro/`](src/xlerobot_pro/) | Vision and IK library, robot model, and the servo limits              |
+| [`examples/`](examples/README.md)        | Bring-up, teleoperation, policy, and vision examples                  |
+| [`benchmarks/`](benchmarks/README.md)    | The SmolVLA and Diffusion Policy timing scripts used in the paper     |
+| [`scripts/`](scripts/)                   | Whole-robot calibration and the two-arm bus helper                    |
+| [`diagnostics/`](diagnostics/README.md)  | Bus, motor, and frame-transform debugging tools                       |
+| [`calibration/`](calibration/)           | Reference calibrations and the hand mask used for the grasping policy |
+| [`hardware/`](hardware/README.md)        | Print files, print settings, and the URDF                             |
+| [`requirements/`](requirements/)         | Vision requirements and lockfiles                                     |
+| [`tests/`](tests/)                       | Hardware-free tests (`make smoke`)                                    |
 
 ## Data
 

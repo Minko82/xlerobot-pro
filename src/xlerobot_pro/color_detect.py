@@ -105,6 +105,7 @@ def detect_object(color: str = "red", captures_dir: str | Path | None = None) ->
     """
     if captures_dir is None:
         from xlerobot_pro.config import CAPTURE_DIR
+
         captures_dir = CAPTURE_DIR
     else:
         captures_dir = Path(captures_dir)

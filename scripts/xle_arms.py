@@ -47,8 +47,7 @@ class SO101FollowerArm(SO101Follower):
         self.bus = FeetechMotorsBus(
             port=config.port,
             motors={
-                name: Motor(ids[i], "sts3215",
-                            MotorNormMode.RANGE_0_100 if name == "gripper" else norm)
+                name: Motor(ids[i], "sts3215", MotorNormMode.RANGE_0_100 if name == "gripper" else norm)
                 for i, name in enumerate(JOINTS)
             },
             calibration=self.calibration,
