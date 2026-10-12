@@ -10,9 +10,9 @@ This repository holds the software, the servo settings, and the print files. The
 
 In its $660 configuration, XLeRobot runs its learned policies on a laptop that you supply; an optional Raspberry Pi can run a small ACT policy, but training and larger models need another computer. Putting the computer on the robot exposed two problems, and fixing them is most of what this build adds.
 
-- **Power.** In XLeRobot's wiring, each arm shares a servo bus with either the head or the wheels, and each bus draws from its own USB-C outlet. Moving an arm and the head together browned out the shared bus in 5 of 5 stress trials, and each collapse needed a power cycle. Now both arms draw from the power station's 12 V car outlet, the head and wheels from one USB-C outlet, and the Jetson from another. Under the same protocol, with the firmware settings below, none of 5 trials browned out.
+- **Power.** In XLeRobot's wiring, each arm shares a servo bus with either the head or the wheels, and each bus draws from its own USB-C outlet. Moving an arm and the head together collapsed the shared bus supply in 5 of 5 stress trials, and each collapse needed a power cycle. Now both arms draw from the power station's 12 V car outlet, the head and wheels from one USB-C outlet, and the Jetson from another. Under the same protocol, with the firmware settings below, the supply held in all 5 trials. Those trials don't separate the outlet change from the firmware limits.
 - **Printed links.** On the default print profile, the arm broke at a printed link before the servo gave out. Printing the load-bearing links with 4 perimeters instead of 2 raised the arm's failure load by 67% (18.5 N against 11.1 N) for 80 g more per arm, and the failure moved to the servo.
-- **Compute.** A Jetson Orin Nano Super sits in a passively ducted enclosure at the center of the cart, with a RealSense D435 on the neck. Together they account for $594 of the total.
+- **Compute.** A Jetson Orin Nano Super sits in a ducted enclosure at the center of the cart, with a RealSense D435 on the neck. Together they account for $594 of the total.
 
 ## What it can do
 

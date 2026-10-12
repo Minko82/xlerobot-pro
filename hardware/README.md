@@ -8,7 +8,7 @@
 | `XLeRobot040_armbase.step` | Arm base, as editable CAD (STEP) |
 | `xlerobot/` | URDF and meshes for visualization |
 
-The 3MF also holds the passively ducted Jetson enclosure, the arm-base mounts, the neck, and the wheel hubs and motor mounts.
+The 3MF also holds the ducted Jetson enclosure, the arm-base mounts, the neck, and the wheel hubs and motor mounts.
 
 ## Print settings
 
