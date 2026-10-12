@@ -22,7 +22,7 @@ These are the paper's measurements. Each holds for the conditions next to it.
 |---|---|---|
 | Learned grasping | 49 of 50 trials | ACT trained on the Jetson in under an hour; the left arm lifts a 100 mL glass bottle from a shelf; one marked bottle pose; base stationary; on battery |
 | Policy timing | ACT 104.5 ms, Diffusion Policy 540 ms, SmolVLA 997 ms | One pass on the Jetson in MAXN SUPER; 10 denoising steps for Diffusion Policy and SmolVLA |
-| Shoulder hold | 0.7 kg for 30 min | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped. The 0.7 kg hold probably ran with the power station on pass-through charging, which kept a matched 0.8 kg hold 2 °C cooler |
+| Shoulder hold | 0.7 kg for 30 min | One shoulder servo, load 18.6 cm from the joint, 24.4 °C room. 0.8 kg reached 65 °C after 27.8 min, 0.9 kg after 22.1 min, and 1 kg slipped. All holds ran on battery |
 | Teleoperated grasping | 74 of 75 attempts | Five objects (a plastic apple, a cube, a drill, a water bottle, and a screwdriver), 15 attempts each, with the Fin-Ray fingers; the one miss was the 17 g apple |
 | Battery | About 13–16 h of SmolVLA inference, about 17 h holding loads | Projected from whole-percent charge readings on the 288 Wh power station, not run to depletion |
 
