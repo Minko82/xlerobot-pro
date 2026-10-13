@@ -1,6 +1,6 @@
 # XLeRobot-Pro
 
-<img width="894" height="455" alt="The robot removing a screw from an electric-vehicle battery pack under VR teleoperation" src="https://github.com/user-attachments/assets/d8b911e5-4e95-4397-965e-9f6c243c8a38" />
+<img width="894" height="455" alt="The robot removing a screw from an electric-vehicle battery pack under VR teleoperation" src="docs/images/hero_screw_removal.jpg" />
 
 XLeRobot-Pro is [XLeRobot](https://github.com/Vector-Wangel/XLeRobot) with the computer on board. It keeps XLeRobot's two SO-101 arms, omni-wheel base, and power station, and adds a Jetson Orin Nano Super, a RealSense D435, separate power outlets for the arms, the head and wheels, and the computer, and stronger printed arm links. The parts cost $1,247, and the robot can record demonstrations, train a policy, and run it on battery without a second machine.
 
