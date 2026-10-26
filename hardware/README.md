@@ -4,11 +4,13 @@
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `XLeRobot-Pro.3mf`                 | PrusaSlicer project with every printed part laid out, print settings included (set up for a Prusa CORE One) |
 | `XLeRobot-Pro.stl`                 | The same parts as a single STL                                                                              |
-| `nvidia-jetson-mounting-frame.stl` | Mounting frame for the Jetson Orin Nano Super                                                               |
+| `nvidia-jetson-mounting-frame.stl` | Open frame for the Jetson Orin Nano Super. Not in the 3MF, so print it separately                           |
 | `XLeRobot040_armbase.step`         | Arm base, as editable CAD (STEP)                                                                            |
 | `xlerobot/`                        | URDF and meshes for visualization                                                                           |
 
-The 3MF also holds the ducted Jetson enclosure, the arm-base mounts, the neck, and the wheel hubs and motor mounts.
+The 3MF also holds the arm-base mounts, the neck, and the wheel hubs and motor mounts.
+
+The optional wrist cameras are not part of the paper's build, so their mount is not in this folder. Use the SO-101 [Hex-Nut wrist-camera mount](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/SO101_Wrist_Cam_Hex-Nut_Mount_32x32_UVC_Module) from SO-ARM100, the same one XLeRobot uses.
 
 ## Print settings
 

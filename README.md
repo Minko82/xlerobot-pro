@@ -12,7 +12,7 @@ In its $660 configuration, XLeRobot runs its learned policies on a laptop that y
 
 - **Power.** In XLeRobot's wiring, each arm shares a servo bus with either the head or the wheels, and each bus draws from its own USB-C outlet. Moving an arm and the head together collapsed the shared bus supply in 5 of 5 stress trials, and each collapse needed a power cycle. Now both arms draw from the power station's 12 V car outlet, the head and wheels from one USB-C outlet, and the Jetson from another. Under the same protocol, with the firmware settings below, the supply held in all 5 trials. Those trials don't separate the outlet change from the firmware limits.
 - **Printed links.** On the default print profile, the arm broke at a printed link before the servo gave out. Printing the load-bearing links with 4 perimeters instead of 2 raised the arm's failure load by 67% (18.5 N against 11.1 N) for 80 g more per arm, and the failure moved to the servo.
-- **Compute.** A Jetson Orin Nano Super sits in a ducted enclosure at the center of the cart, with a RealSense D435 on the neck. Together they account for $594 of the total.
+- **Compute.** A Jetson Orin Nano Super sits on an open frame at the center of the cart, with a RealSense D435 on the neck. Together they account for $594 of the total.
 
 ## What it can do
 
@@ -32,21 +32,21 @@ The holding results come from one servo, and the grasping policy was tested at o
 
 ### Parts
 
-| Subsystem  | Component                                                                      | Qty | USD          |
-| ---------- | ------------------------------------------------------------------------------ | --- | ------------ |
-| Compute    | Jetson Orin Nano Super + microSD                                               | 1   | 260.23       |
-| Perception | Intel RealSense D435                                                           | 1   | 333.75       |
-| Actuation  | Feetech STS3215, 12 V (ST-3215-C018) + 2 bus driver boards                     | 17  | 292.93       |
-| Power      | Anker SOLIX C300 DC power station                                              | 1   | 159.99       |
-| Structure  | IKEA RÅSKOG steel cart, 3 omni wheels, PLA (incl. Jetson enclosure), fasteners | 1   | 129.95       |
-| Cabling    | USB-C hub, power cables, connectors                                            | 7   | 70.42        |
-| **Total**  |                                                                                |     | **1,247.27** |
+| Subsystem  | Component                                                                       | Qty | USD          |
+| ---------- | ------------------------------------------------------------------------------- | --- | ------------ |
+| Compute    | Jetson Orin Nano Super + microSD                                                | 1   | 260.23       |
+| Perception | Intel RealSense D435                                                            | 1   | 333.75       |
+| Actuation  | Feetech STS3215, 12 V (ST-3215-C018) + 2 bus driver boards                      | 17  | 292.93       |
+| Power      | Anker SOLIX C300 DC power station                                               | 1   | 159.99       |
+| Structure  | IKEA RÅSKOG steel cart, 3 omni wheels, PLA (incl. Jetson open frame), fasteners | 1   | 129.95       |
+| Cabling    | USB-C hub, power cables, connectors                                             | 7   | 70.42        |
+| **Total**  |                                                                                 |     | **1,247.27** |
 
 These are the prices we paid. The total leaves out the 3D printer, TPU filament for the fingers, and the VR headset used for teleoperation. The [components page](https://minko82.github.io/xlerobot-pro-website/components.html) lists every line item with a link.
 
 ### Printing
 
-Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets **4 perimeters and 15% infill** (High-Shell), everything else stays on the default 2 perimeters, and the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) already applies these settings. The test results behind them, the Jetson mounting frame, and an editable STEP file of the arm base are in [`hardware/`](hardware/README.md) too.
+Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets **4 perimeters and 15% infill** (High-Shell), everything else stays on the default 2 perimeters, and the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) already applies these settings. The test results behind them, the Jetson open frame (`nvidia-jetson-mounting-frame.stl`, which is not in the 3MF), and an editable STEP file of the arm base are in [`hardware/`](hardware/README.md) too.
 
 ### Power and buses
 
@@ -149,7 +149,7 @@ sudo nvpmodel -m 2      # MAXN SUPER. On the Orin Nano Super, mode 0 is 15 W and
 sudo jetson_clocks      # optional: pins the clocks; SmolVLA ran about 6.5% faster
 ```
 
-Long training runs keep the Jetson near 22 W for hours, which is more than the passive enclosure was designed for. One 60,000-step run ended in a thermal shutdown about two hours in. For long jobs, leave the clocks dynamic, save checkpoints often, and put a fan on the board.
+Long training runs keep the Jetson near 22 W for hours, which is more than the open frame was designed for. One 60,000-step run ended in a thermal shutdown about two hours in. For long jobs, leave the clocks dynamic, save checkpoints often, and put a fan on the board.
 
 ## Learning on the robot
 
