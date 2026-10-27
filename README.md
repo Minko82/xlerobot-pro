@@ -46,7 +46,7 @@ These are the prices we paid. The total leaves out the 3D printer, TPU filament 
 
 ### Printing
 
-Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets **4 perimeters and 15% infill** (High-Shell), everything else stays on the default 2 perimeters, and the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) already applies these settings. The test results behind them, the Jetson open frame (`nvidia-jetson-mounting-frame.stl`, which is not in the 3MF), and an editable STEP file of the arm base are in [`hardware/`](hardware/README.md) too.
+Print everything in PLA at 0.2 mm layers. Every printed part of both arms gets **4 perimeters and 15% infill** (High-Shell), everything else stays on the default 2 perimeters, and the Fin-Ray fingers are TPU 95A. The 3MF project in [`hardware/`](hardware/README.md) already applies these settings. It holds every printed part, the Jetson open frame included. The test results behind these settings and an editable STEP file of the arm base are in [`hardware/`](hardware/README.md) too.
 
 ### Power and buses
 
