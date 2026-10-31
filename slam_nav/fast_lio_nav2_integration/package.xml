@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fast_lio_nav2_integration</name>
+  <version>0.0.1</version>
+  <description>RTAB-Map SLAM and Nav2 navigation for the XLeRobot base with a RealSense depth camera.</description>
+  <maintainer email="jela4948@colorado.edu">Your Name</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>ament_index_python</depend>
+  <depend>tf2_ros</depend>
+  <depend>nav2_bringup</depend>
+  <depend>nav2_bt_navigator</depend>
+  <depend>nav2_map_server</depend>
+  <depend>nav2_planner</depend>
+  <depend>nav2_controller</depend>
+  <depend>nav2_behaviors</depend>
+  <depend>nav2_lifecycle_manager</depend>
+  <depend>nav2_mppi_controller</depend>
+  <depend>nav2_smac_planner</depend>
+  <depend>pointcloud_to_laserscan</depend>
+  <depend>topic_tools</depend>
+  <depend>realsense2_camera</depend>
+  <depend>rtabmap_ros</depend>
+  <depend>rtabmap_launch</depend>
+  <depend>rviz2</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
