@@ -183,7 +183,8 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: false
-      footprint: "[[0.025, 0.025], [0.025, -0.025], [-0.025, -0.025], [-0.025, 0.025]]"
+      # RASKOG cart base tier is 0.391 x 0.459 m (xlerobot.urdf); square covers either mounting orientation
+      footprint: "[[0.23, 0.23], [0.23, -0.23], [-0.23, -0.23], [-0.23, 0.23]]"
       resolution: 0.05
       track_unknown_space: true
       transform_tolerance: 1.0
@@ -215,7 +216,7 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        inflation_radius: 0.3
+        inflation_radius: 0.35  # >= circumscribed footprint radius (0.325 m)
 local_costmap:
   local_costmap:
     ros__parameters:
@@ -228,7 +229,8 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      footprint: "[[0.025, 0.025], [0.025, -0.025], [-0.025, -0.025], [-0.025, 0.025]]"
+      # RASKOG cart base tier is 0.391 x 0.459 m (xlerobot.urdf); square covers either mounting orientation
+      footprint: "[[0.23, 0.23], [0.23, -0.23], [-0.23, -0.23], [-0.23, 0.23]]"
       plugins:
       - obstacle_layer
       - inflation_layer
@@ -250,7 +252,7 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        inflation_radius: 0.3
+        inflation_radius: 0.35  # >= circumscribed footprint radius (0.325 m)
 map_server:
   ros__parameters:
     use_sim_time: false

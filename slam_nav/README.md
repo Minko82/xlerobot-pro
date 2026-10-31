@@ -68,5 +68,5 @@ All three start a fresh map on each launch (`--delete_db_on_start`) and save it 
 - **Bridge safety:** the wheels stop if no `/cmd_vel` arrives for 0.25 s. Speeds are clamped to 0.6 m/s and 1.8 rad/s. Use `linear_gain`, `angular_gain` and `invert_linear` to tune.
 - **Python environment:** the bridges import `lerobot`. The wheels-only launch runs its bridge with `~/miniconda3/envs/lerobot/bin/python`. `test_lekiwi_nav2.launch.py` uses plain `python3`, so that interpreter needs `lerobot` installed.
 - **RealSense workaround:** the point cloud is re-enabled 12 s after launch (`pointcloud__neon_.enable`) because the driver's parameter name doesn't match the launch argument.
-- **Robot outline:** `lekiwi_nav2_config.yaml` still uses a 5 cm placeholder square for the robot's outline. Set it to the real base size.
+- **Robot outline:** `lekiwi_nav2_config.yaml` uses a 0.46 m square that covers the RÅSKOG cart's 0.391 × 0.459 m base tier either way it is mounted. Shrink it to the real outline once the orientation is confirmed, or to the bare base if the cart isn't mounted.
 - **Package name:** the package is still called `fast_lio_nav2_integration` because it was ported from `fast_lio_nav2_humanoid`. FAST_LIO itself is not used.
